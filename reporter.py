@@ -45,3 +45,4 @@ def push_update_to_git(file_path):
         ],
         cwd=Path(__file__).parent,
     )
+    subprocess.run(["git", "push"], cwd=Path(__file__).parent)
