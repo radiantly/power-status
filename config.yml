@@ -155,6 +155,7 @@ params:
   systems:
     - name: Power
       category: Uncategorized
+      partial: custom/metrics
 
   # What date format to use?
   #
@@ -275,7 +276,7 @@ params:
   # on the footer and meta tags.
   #
   # Default: We continuously monitor the status of our services and if there are any interruptions, a note will be posted here.
-  description: Current status of electricity in bangalore and historical data of BESCOM outages
+  description: Current status of electricity in bangalore and historical data of BESCOM power outages
 
   # Tabs on homepage
   # Uncomment to enable.
@@ -317,7 +318,7 @@ params:
   # down: "#e60000"
   # notice: "#24478f"
   brand: "#0a0c0f"
-  ok: "#008000"
+  ok: "#3EBF66"
   disrupted: "#cc4400"
   down: "#e60000"
   notice: "#24478f"

@@ -1,0 +1,91 @@
+{{ $days := 90 }}
+
+{{ $ComponentIssues := $.incidents }}
+<!-- Calculate availability time-->
+{{ $downtime := 0 }}
+{{ $outageInfo := newScratch}}
+{{ range $ComponentIssues }}
+  {{ $beginTime := time .Params.date }}
+  {{ $endTime := time (default now .Params.resolvedwhen) }}
+  {{ $duration := ($endTime.Sub $beginTime).Seconds }}
+
+  {{ $today := sub now.Unix (mul now.Hour 24 60) (mul now.Minute 60) now.Second }}
+  {{ $tomorrow := add $today 86400 }}
+  {{ $howLongAgo := div (sub $tomorrow $endTime.Unix) 86400}}
+  {{ if lt $howLongAgo $days }}
+    {{ $downtime = (add $downtime $duration) }}
+    
+    {{ $key := string (sub $days $howLongAgo 1) }}
+    {{ $outageInfo.Add $key (slice $duration)}}
+  {{ end }}
+  <!-- {{ $duration }} -->
+{{ end }}
+<!-- {{ $downtime }} -->
+{{ $averageAvailibility := sub 100 (div (float $downtime) (mul $days 24 60 60)) }}
+<div class="range-wrap">
+
+  {{ $barHeight := 30 }}
+  {{ $barWidth := 3 }}
+  {{ $gapWidth := 2 }}
+
+  {{ $totWidth := add $barWidth $gapWidth }}
+  <svg viewBox="0 0 {{ sub (mul $days $totWidth) $gapWidth }} {{ $barHeight }}" preserveAspectRatio="none" height="{{ $barHeight }}">
+  {{ range $i := seq 0 (sub $days 1) }}
+    {{ $boxdate := (time (now.Format "2006-01-02")).AddDate 0 0 $i }}
+    {{ $outageCount := default "" ($outageInfo.Get (string $i)) | len }}
+    <rect class="{{ cond ($outageCount | not) "green" "red"}}" width="{{ $barWidth }}" x="{{ mul $i $totWidth }}" height="{{ $barHeight }}" data-outage-count="{{ $outageCount }}"  />
+  {{ end }}
+  </svg>
+  <div class="info-row">
+    <div>{{ $days }} days ago</div>
+    <div class="line"></div>
+    <div>{{ printf "%.5f" $averageAvailibility }}% uptime</div>
+    <div class="line"></div>
+    <div>Today</div>
+  </div>
+</div>
+
+<style>
+  .range-wrap {
+    display: flex;
+    flex-direction: column;
+    padding-top: 15px;
+    gap: 10px;
+  }
+  .range-wrap svg {
+    display: block;
+    height: 30px;
+    width: 100%;
+
+    /* Forces subpixel rendering on firefox */
+    transform: rotate(0.1deg);
+  }
+
+  .range-wrap svg rect.green {
+    fill: #3EBF66;
+  }
+  .range-wrap svg rect.red {
+    fill: #bf3e3e;
+  }
+
+  .info-row {
+    --text-color: #888;
+    display: flex;
+    color: var(--text-color);
+    font-size: 0.9rem;
+  }
+  .info-row .line {
+    flex-grow: 1;
+    position: relative;
+  }
+  .info-row .line::after {
+    content: "";
+    position: absolute;
+    height: 1px;
+    background-color: var(--text-color);
+    opacity: 0.25;
+    width: 90%;
+    top: 60%;
+    left: 5%;
+  }
+</style>
