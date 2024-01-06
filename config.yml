@@ -156,6 +156,7 @@ params:
     - name: Power
       category: Uncategorized
       partial: custom/metrics
+      dataStart: 2024-01-05
 
   # What date format to use?
   #
@@ -260,7 +261,7 @@ params:
   #
   # Default: `false`
   # BOOLEAN; `true`, `false`
-  useLogo: true
+  useLogo: false
 
   # Where is the logo located, if one is
   # present at all?
