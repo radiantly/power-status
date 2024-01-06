@@ -168,7 +168,7 @@ params:
   # dateFormat Default: "January 2, 2006 at 3:04 PM"
   # shortDateFormat Default: "15:04 — Jan 2"
   dateFormat: January 2, 2006 at 3:04 PM IST
-  shortDateFormat: 15:04 IST — Jan 2
+  shortDateFormat: 15:04:05 IST — Jan 2
 
   # Should relative time (x min ago) be used?
   #
