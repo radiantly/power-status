@@ -22,74 +22,66 @@
   <!-- {{ $duration }} -->
 {{ end }}
 <!-- {{ $downtime }} -->
-{{ $averageAvailibility := sub 100 (div (float $downtime) (mul $days 24 60 60)) }}
-<div class="range-wrap">
+{{ $averageAvailibility := sub 100 (div (float (mul $downtime 100)) (mul $days 24 60 60)) }}
+<div class="metrics-partial">
 
   {{ $barHeight := 30 }}
   {{ $barWidth := 3 }}
   {{ $gapWidth := 2 }}
 
   {{ $totWidth := add $barWidth $gapWidth }}
-  <svg viewBox="0 0 {{ sub (mul $days $totWidth) $gapWidth }} {{ $barHeight }}" preserveAspectRatio="none" height="{{ $barHeight }}">
-  {{ range $i := seq 0 (sub $days 1) }}
-    {{ $boxdate := now.AddDate 0 0 (int (sub $i $days -1)) }}
-    {{ $outageCount := default "" ($outageInfo.Get (string $i)) | len }}
-    <rect data-date="{{ $boxdate }}" class="{{ cond ($boxdate.Before $dataStart) "gray" (cond ($outageCount | not) "green" "red")}}" width="{{ $barWidth }}" x="{{ mul $i $totWidth }}" height="{{ $barHeight }}" data-outage-count="{{ $outageCount }}"  />
-  {{ end }}
-  </svg>
+  <div class="svg-wrap">
+    <svg viewBox="0 0 {{ sub (mul $days $totWidth) $gapWidth }} {{ $barHeight }}" preserveAspectRatio="none" height="{{ $barHeight }}">
+      {{ range $i := seq 0 (sub $days 1) }}
+        {{ $boxdate := now.AddDate 0 0 (int (sub $i $days -1)) }}
+        {{ $outageCount := default "" ($outageInfo.Get (string $i)) | len }}
+        <rect 
+          class="{{ cond ($boxdate.Before $dataStart) "gray" (cond ($outageCount | not) "green" "red")}}"
+          width="{{ $barWidth }}" x="{{ mul $i $totWidth }}"
+          height="{{ $barHeight }}"
+          data-date="{{ $boxdate.Format "2006-01-02" }}"
+          data-outage-count="{{ $outageCount }}"
+          data-outage-seconds="{{ math.Sum ($outageInfo.Get (string $i)) }}"
+        />
+      {{ end }}
+    </svg>
+    <div class="tooltip-details">
+      <div class="tooltip-date">2024-01-04</div>
+      <div class="tooltip-summary">No data recorded</div>
+    </div>
+  </div>
   <div class="info-row">
     <div>{{ $days }} days ago</div>
     <div class="line"></div>
-    <div>{{ printf "%.5f" $averageAvailibility }}% uptime</div>
+    <div>{{ printf "%.2f" $averageAvailibility }}% uptime</div>
     <div class="line"></div>
     <div>Today</div>
   </div>
 </div>
 
-<style>
-  .range-wrap {
-    display: flex;
-    flex-direction: column;
-    padding-top: 15px;
-    gap: 10px;
-  }
-  .range-wrap svg {
-    display: block;
-    height: 30px;
-    width: 100%;
+<script>
+  const pluralFix = (val, unit) => `${val} ${unit}${val > 1 ? "s" : ""}`;
 
-    /* Forces subpixel rendering on firefox */
-    transform: rotate(0.1deg);
+  const humanTimeDuration = seconds => {
+    if (seconds < 60) return pluralFix(seconds, "second");
+    if (seconds < 90 * 60) return pluralFix(Math.ceil(seconds / 60), "minute");
+    return pluralFix(Math.ceil(seconds / 60 / 60), "hour");
   }
 
-  .range-wrap svg rect.gray {
-    fill: #ddd;
-  }
-  .range-wrap svg rect.green {
-    fill: #3EBF66;
-  }
-  .range-wrap svg rect.red {
-    fill: #ec5353;
-  }
+  document.querySelectorAll(".metrics-partial .svg-wrap").forEach(svgWrap => {
+    const tooltip = svgWrap.querySelector(".tooltip-details");
+    const tooltipDate = tooltip.querySelector(".tooltip-date");
+    const tooltipSummary = tooltip.querySelector(".tooltip-summary");
 
-  .info-row {
-    --text-color: #888;
-    display: flex;
-    color: var(--text-color);
-    font-size: 0.9rem;
-  }
-  .info-row .line {
-    flex-grow: 1;
-    position: relative;
-  }
-  .info-row .line::after {
-    content: "";
-    position: absolute;
-    height: 1px;
-    background-color: var(--text-color);
-    opacity: 0.25;
-    width: 90%;
-    top: 60%;
-    left: 5%;
-  }
-</style>
+    const svg = svgWrap.querySelector("svg");
+    let {x: svgX, width: svgWidth} = svg.getBoundingClientRect();
+    window.addEventListener("resize", () => ({x: svgX, width: svgWidth} = svg.getBoundingClientRect()));
+
+    svg.addEventListener("mousemove", e => {
+      if (e.target.tagName !== "rect") return;
+      tooltip.style.transform = `translateX(${Math.round(e.clientX - svgX - 125)}px)`;
+      tooltipDate.innerHTML = e.target.dataset.date;
+      tooltipSummary.innerHTML = parseInt(e.target.dataset.outageCount) ? `${pluralFix(e.target.dataset.outageCount, "outage")} totalling ${humanTimeDuration(e.target.dataset.outageSeconds)}.` : "No outages recorded.";
+    }, {passive: true})
+  })
+</script>

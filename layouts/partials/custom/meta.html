@@ -1,0 +1,84 @@
+<style>
+  /* metrics.html */
+  .metrics-partial {
+    display: flex;
+    flex-direction: column;
+    padding-top: 15px;
+    gap: 10px;
+  }
+
+  .svg-wrap {
+    position: relative;
+  }
+
+  .svg-wrap svg {
+    display: block;
+    height: 30px;
+    width: 100%;
+
+    /* Forces subpixel rendering on firefox */
+    transform: rotate(0.1deg);
+  }
+
+  .svg-wrap .tooltip-details {
+    opacity: 0;
+    width: 250px;
+    background-color: white;
+
+    position: absolute;
+    top: calc(100% + 5px);
+    left: 0;
+    z-index: 1337;
+    border: 1px solid #ddd;
+    padding: 10px 20px;
+    border-radius: 5px;
+
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+    transition: all 0.2s ease;
+    font-size: 0.9rem;
+    pointer-events: none;
+  }
+
+  .svg-wrap:hover .tooltip-details {
+    opacity: 1;
+    color: #222;
+  }
+
+  .svg-wrap .tooltip-details .tooltip-date {
+    font-weight: 700;
+    color: #777;
+  }
+
+  .metrics-partial svg rect.gray {
+    fill: #ddd;
+  }
+  .metrics-partial svg rect.green {
+    fill: #3ebf66;
+  }
+  .metrics-partial svg rect.red {
+    fill: #ec5353;
+  }
+
+  .info-row {
+    --text-color: #888;
+    display: flex;
+    color: var(--text-color);
+    font-size: 0.9rem;
+  }
+  .info-row .line {
+    flex-grow: 1;
+    position: relative;
+  }
+  .info-row .line::after {
+    content: "";
+    position: absolute;
+    height: 1px;
+    background-color: var(--text-color);
+    opacity: 0.25;
+    width: 90%;
+    top: 60%;
+    left: 5%;
+  }
+</style>
