@@ -5,6 +5,7 @@
 
 [build.environment]
     HUGO_VERSION = "0.121.1"
+    TZ = "Asia/Kolkata"
 
 [context.production.environment]
     HUGO_ENV = "production"
@@ -20,3 +21,4 @@
     for = "/*"
     [headers.values]
       Access-Control-Allow-Origin = "*"
+      Content-Security-Policy = "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'"
