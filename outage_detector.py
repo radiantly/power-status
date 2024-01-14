@@ -1,3 +1,6 @@
+# This script can be run on a laptop connected to AC power 24/7 and then uses
+# windows system events to detect changes to AC power.
+
 import xml.etree.ElementTree as ET
 from datetime import datetime
 
@@ -5,12 +8,16 @@ import win32evtlog
 
 from reporter import create_outage_issue
 
-channel = "System"
 current_ac_state = None
 last_event_time = None
 
 
 def on_event(action, context, event_handle):
+    """
+    Handle system event and check if it is a power status change.
+
+    If there is a power status change, a power outage report is created.
+    """
     global current_ac_state, last_event_time
 
     if action == win32evtlog.EvtSubscribeActionDeliver:
@@ -41,10 +48,23 @@ def on_event(action, context, event_handle):
         current_ac_state = ac_state
 
 
-handle = win32evtlog.EvtSubscribe(
-    channel, win32evtlog.EvtSubscribeToFutureEvents, None, Callback=on_event
-)
+def system_events_listener():
+    """Subscribe to windows system events"""
 
-input("Listening to system events... (Press Enter to exit)")
+    channel = "System"
 
-win32evtlog.CloseEventLog(handle)
+    handle = win32evtlog.EvtSubscribe(
+        channel, win32evtlog.EvtSubscribeToFutureEvents, None, Callback=on_event
+    )
+
+    input("Listening to system events... (Press Enter to exit)")
+
+    win32evtlog.CloseEventLog(handle)
+
+
+def main():
+    system_events_listener()
+
+
+if __name__ == "__main__":
+    main()

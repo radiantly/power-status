@@ -1,10 +1,13 @@
 import subprocess
+import threading
 import time
 from datetime import datetime
 from pathlib import Path
 
 
 def create_outage_issue(start_time: datetime, end_time: datetime):
+    """Creates an outage report given a start and end datetime"""
+
     start_time_str = (
         start_time.astimezone().replace(microsecond=0, tzinfo=None).isoformat(sep=" ")
     )
@@ -30,7 +33,13 @@ Power outage from {{{{< track "{start_time_str}" >}}}} to {{{{< track "{end_time
     push_update_to_git(issue_path)
 
 
-def push_update_to_git(file_path):
+def push_update_to_git(file_path: Path):
+    """Add given outage report to git"""
+
+    def pull_and_push():
+        subprocess.run(["git", "pull"], cwd=Path(__file__).parent)
+        subprocess.run(["git", "push"], cwd=Path(__file__).parent)
+
     subprocess.run(["git", "add", file_path], cwd=Path(__file__).parent)
     subprocess.run(
         [
@@ -45,4 +54,6 @@ def push_update_to_git(file_path):
         ],
         cwd=Path(__file__).parent,
     )
-    subprocess.run(["git", "push"], cwd=Path(__file__).parent)
+
+    # Wait a bit of time for internet to come up
+    threading.Timer(66, pull_and_push).start()

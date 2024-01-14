@@ -1,0 +1,21 @@
+name: Daily Netlify Redeploy
+
+on:
+  schedule:
+    - cron: '0 20 * * *' 
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout Repo
+      uses: actions/checkout@v4
+
+    - name: Trigger Deploy
+      uses: netlify/actions/cli@master
+      with:
+        args: deploy --prod
+      env:
+        NETLIFY_SITE_ID: ${{ secrets.SITE_ID }}
+        NETLIFY_AUTH_TOKEN: ${{ secrets.NETLIFY_AUTH_TOKEN }}
