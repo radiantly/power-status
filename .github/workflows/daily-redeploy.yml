@@ -1,6 +1,7 @@
 name: Daily Netlify Redeploy
 
 on:
+  workflow_dispatch:
   schedule:
     - cron: '0 20 * * *' 
 
@@ -9,13 +10,4 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-    - name: Checkout Repo
-      uses: actions/checkout@v4
-
-    - name: Trigger Deploy
-      uses: netlify/actions/cli@master
-      with:
-        args: deploy --prod
-      env:
-        NETLIFY_SITE_ID: ${{ secrets.SITE_ID }}
-        NETLIFY_AUTH_TOKEN: ${{ secrets.NETLIFY_AUTH_TOKEN }}
+    - run: curl -X POST -d '{}' ${{ secrets.NETLIFY_BUILD_HOOK }}
