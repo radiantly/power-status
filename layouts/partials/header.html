@@ -4,6 +4,16 @@
     <div class="spacer"></div>
   </div>
 </div>
+<div class="contain">
+  <details class="info">
+    <summary>What is this?</summary>
+    <p>
+      Hi! This website tracks the power outages in bangalore. Website source
+      available on
+      <a href="https://github.com/radiantly/power-status">GitHub</a>.
+    </p>
+  </details>
+</div>
 <style>
   .top-row {
     display: flex;
@@ -12,5 +22,18 @@
   .top-row .title {
     font-size: 24px;
     font-weight: 800;
+  }
+
+  .info {
+    color: #666;
+  }
+
+  .info summary {
+    cursor: pointer;
+    text-decoration: underline dotted #888 2px;
+  }
+
+  .info summary:hover {
+    opacity: 0.8;
   }
 </style>
