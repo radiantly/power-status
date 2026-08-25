@@ -1,7 +1,7 @@
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use anyhow::{Result, bail};
-use rusqlite::{Connection, Transaction, params, types::Null};
+use rusqlite::{Connection, Transaction, ffi, params, types::Null};
 use serde::Serialize;
 use tokio::sync::{mpsc, oneshot};
 
@@ -30,6 +30,11 @@ pub(crate) struct OutageRow {
     untracked: bool,
     excluded: Option<bool>,
     notes: Option<String>,
+}
+
+pub(crate) enum PatchOutcome {
+    Updated,
+    OutageNotFound,
 }
 
 impl Database {
@@ -147,6 +152,35 @@ impl Database {
         })
     }
 
+    fn patch_outage_info(
+        &self,
+        monitor_id: &str,
+        start: i64,
+        excluded: Option<bool>,
+        notes: Option<String>,
+    ) -> anyhow::Result<PatchOutcome> {
+        let result = self
+            .connection
+            .prepare_cached(
+                "INSERT INTO outage_info (monitor_id, start, excluded, notes)
+                 VALUES (?1, ?2, ?3, ?4)
+                 ON CONFLICT (monitor_id, start) DO UPDATE SET
+                     excluded = COALESCE(?3, excluded),
+                     notes    = COALESCE(?4, notes)",
+            )?
+            .execute(params![monitor_id, start, excluded, notes]);
+
+        match result {
+            Ok(_) => Ok(PatchOutcome::Updated),
+            Err(rusqlite::Error::SqliteFailure(error, _))
+                if error.extended_code == ffi::SQLITE_CONSTRAINT_FOREIGNKEY =>
+            {
+                Ok(PatchOutcome::OutageNotFound)
+            }
+            Err(error) => Err(error.into()),
+        }
+    }
+
     fn update_status(
         &mut self,
         monitor_id: &str,
@@ -233,6 +267,13 @@ impl Database {
 enum DatabaseMessage {
     GetOverallStatus(oneshot::Sender<anyhow::Result<OverallStatus>>),
     UpdateStatus(oneshot::Sender<anyhow::Result<()>>, String, bool, i64, i64),
+    PatchOutageInfo(
+        oneshot::Sender<anyhow::Result<PatchOutcome>>,
+        String,
+        i64,
+        Option<bool>,
+        Option<String>,
+    ),
 }
 
 #[derive(Debug, Clone)]
@@ -254,6 +295,14 @@ impl DatabaseHandle {
                     DatabaseMessage::UpdateStatus(tx, monitor_id, up, seq_num, last_update) => {
                         let _ =
                             tx.send(database.update_status(&monitor_id, up, seq_num, last_update));
+                    }
+                    DatabaseMessage::PatchOutageInfo(tx, monitor_id, start, excluded, notes) => {
+                        let _ = tx.send(database.patch_outage_info(
+                            &monitor_id,
+                            start,
+                            excluded,
+                            notes,
+                        ));
                     }
                 }
             }
@@ -278,6 +327,20 @@ impl DatabaseHandle {
     pub async fn get_overall_status(&self) -> anyhow::Result<OverallStatus> {
         let (tx, rx) = oneshot::channel();
         self.sender.send(DatabaseMessage::GetOverallStatus(tx))?;
+        rx.await?
+    }
+
+    pub async fn patch_outage_info(
+        &self,
+        monitor_id: impl Into<String>,
+        start: i64,
+        excluded: Option<bool>,
+        notes: Option<String>,
+    ) -> anyhow::Result<PatchOutcome> {
+        let (tx, rx) = oneshot::channel();
+        let message =
+            DatabaseMessage::PatchOutageInfo(tx, monitor_id.into(), start, excluded, notes);
+        self.sender.send(message)?;
         rx.await?
     }
 }

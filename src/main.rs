@@ -1,4 +1,7 @@
-use axum::{Router, routing::get};
+use axum::{
+    Router,
+    routing::{get, patch},
+};
 use monitor::Monitor;
 use std::time::Duration;
 use tracing_subscriber::FmtSubscriber;
@@ -60,6 +63,10 @@ async fn main() -> anyhow::Result<()> {
 
     let api_routes = Router::new()
         .route("/status", get(routes::get_outages))
+        .route(
+            "/monitors/{monitor_id}/outages/{start}",
+            patch(routes::patch_outage_info),
+        )
         .with_state(database);
 
     let app = Router::new().nest("/api", api_routes);
