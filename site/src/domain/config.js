@@ -4,6 +4,17 @@
  * staleness and window size is made here.
  */
 
+/**
+ * Monitors shown on the public page, in the order they are rendered.
+ *
+ * Membership and order in one list. The payload carries every monitor the
+ * server records, internal ones included -- the hourly backup belongs on the
+ * admin page rather than here -- and anything absent from this list is dropped
+ * whole: its card, its rows in the outage log, and its say in the overall
+ * banner.
+ */
+export const PUBLIC_MONITORS = ["power", "internet"];
+
 /** Days of history shown and aggregated over. */
 export const DAY_COUNT = 90;
 
@@ -23,11 +34,16 @@ export const MAJOR_OUTAGE_SECONDS = 10 * 60;
 export const UNTRACKED_DAY_RATIO = 0.5;
 
 /**
- * A monitor that has not reported within this many seconds is reported as
- * unknown rather than as its last known state. The server polls every 10s and
- * itself treats a 60s gap as a lapse, so this is deliberately looser.
+ * How many of its own reporting intervals a monitor may miss before it is
+ * reported as unknown rather than as its last known state.
+ *
+ * Applied to the `next_update_in` each monitor reports, so a ten-second poll
+ * and an hourly backup are judged against their own cadence rather than one
+ * shared timeout. Two is the gap the server itself treats as a lapse, so the
+ * page reads unknown for exactly the stretches the database records as
+ * untracked.
  */
-export const STALE_AFTER_SECONDS = 120;
+export const STALE_UPDATE_FACTOR = 2;
 
 /** How often the status payload is refetched. */
 export const POLL_INTERVAL_MS = 30_000;

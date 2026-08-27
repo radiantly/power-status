@@ -1,9 +1,14 @@
 use anyhow::{Result, bail};
 use async_trait::async_trait;
 use rand::random;
-use std::time::Duration;
+use russh::keys::{Algorithm, PrivateKey, decode_secret_key, ssh_key::Fingerprint};
+use russh_sftp::protocol::OpenFlags;
+use std::{fs, path::PathBuf, str::FromStr, sync::Arc, time::Duration};
 use surge_ping::{Client, Config, PingIdentifier, PingSequence};
 use tapo::ApiClient;
+use tokio::io::AsyncWriteExt;
+
+use crate::{database::DatabaseHandle, sftp::SftpClient};
 
 #[async_trait]
 pub(crate) trait Monitor {
@@ -48,13 +53,8 @@ impl Monitor for TapoPowerMonitor {
     }
 }
 
+#[derive(Default, Debug)]
 pub(crate) struct InternetMonitor;
-
-impl InternetMonitor {
-    pub(crate) fn new() -> Self {
-        InternetMonitor {}
-    }
-}
 
 #[async_trait]
 impl Monitor for InternetMonitor {
@@ -79,6 +79,81 @@ impl Monitor for InternetMonitor {
             Ok(_) = pinger2.ping(PingSequence(0), &[0; 56]) => {}
             else => bail!("failed")
         };
+        Ok(())
+    }
+}
+
+pub(crate) struct BackupMonitor {
+    database: DatabaseHandle,
+    backup_database_path: PathBuf,
+
+    // sftp
+    server: String,
+    server_fingerprint: Fingerprint,
+    server_fingerprint_algo: Algorithm,
+    username: String,
+    private_key: Arc<PrivateKey>,
+}
+
+impl BackupMonitor {
+    pub(crate) fn new(
+        database: DatabaseHandle,
+        backup_database_path: &str,
+        server: impl Into<String>,
+        server_fingerprint: &str,
+        server_fingerprint_algo: Algorithm,
+        username: impl Into<String>,
+        private_key_pem: &str,
+    ) -> Result<Self> {
+        let private_key = decode_secret_key(private_key_pem, None)?.into();
+        let server_fingerprint = Fingerprint::from_str(server_fingerprint)?;
+
+        Ok(BackupMonitor {
+            database,
+            backup_database_path: PathBuf::from(backup_database_path),
+            server: server.into(),
+            server_fingerprint,
+            server_fingerprint_algo,
+            username: username.into(),
+            private_key,
+        })
+    }
+}
+
+#[async_trait]
+impl Monitor for BackupMonitor {
+    fn timeout_interval(&self) -> Duration {
+        Duration::from_mins(10)
+    }
+
+    async fn get_status(&mut self) -> Result<()> {
+        self.database.backup(&self.backup_database_path).await?;
+        let bytes = fs::read(&self.backup_database_path)?;
+        fs::remove_file(&self.backup_database_path)?;
+
+        let sftp = SftpClient::create_session(
+            &self.server,
+            self.server_fingerprint,
+            &self.server_fingerprint_algo,
+            &self.username,
+            self.private_key.clone(),
+        )
+        .await?;
+
+        let mut file = sftp
+            .open_with_flags(
+                "status.db.tmp",
+                OpenFlags::CREATE | OpenFlags::TRUNCATE | OpenFlags::WRITE,
+            )
+            .await?;
+        file.write_all(&bytes).await?;
+        file.close().await?;
+
+        if sftp.try_exists("status.db").await? {
+            sftp.remove_file("status.db").await?;
+        }
+        sftp.rename("status.db.tmp", "status.db").await?;
+
         Ok(())
     }
 }

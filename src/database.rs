@@ -1,7 +1,10 @@
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::{
+    path::{Path, PathBuf},
+    time::{SystemTime, UNIX_EPOCH},
+};
 
 use anyhow::{Result, bail};
-use rusqlite::{Connection, Transaction, ffi, params, types::Null};
+use rusqlite::{Connection, MAIN_DB, Transaction, ffi, params, types::Null};
 use serde::Serialize;
 use tokio::sync::{mpsc, oneshot};
 
@@ -19,6 +22,7 @@ pub(crate) struct OverallStatus {
 pub(crate) struct MonitorRow {
     monitor_id: String,
     up: bool,
+    next_update_in: i64,
     last_update: i64,
 }
 
@@ -38,8 +42,8 @@ pub(crate) enum PatchOutcome {
 }
 
 impl Database {
-    fn new() -> Result<Self> {
-        let connection = Connection::open("./monitor.db")?;
+    fn new(db_path: impl AsRef<Path>) -> Result<Self> {
+        let connection = Connection::open(db_path)?;
 
         connection.pragma_update(None, "journal_mode", &"WAL")?;
         connection.pragma_update(None, "foreign_keys", &1)?;
@@ -48,10 +52,10 @@ impl Database {
         connection.execute_batch(
             "
             CREATE TABLE IF NOT EXISTS monitor (
-                id          TEXT    PRIMARY KEY,
-                up          INTEGER NOT NULL,
-                seq_num     INTEGER NOT NULL,
-                last_update INTEGER NOT NULL
+                id              TEXT    PRIMARY KEY,
+                up              INTEGER NOT NULL,
+                next_update_in  INTEGER NOT NULL,
+                last_update     INTEGER NOT NULL
             );
             
             CREATE TABLE IF NOT EXISTS outages (
@@ -108,13 +112,14 @@ impl Database {
             .connection
             .prepare_cached(
                 "
-                SELECT id, up, last_update
+                SELECT id, up, next_update_in, last_update
                 FROM monitor",
             )?
             .query_map([], |row| {
                 Ok(MonitorRow {
                     monitor_id: row.get("id")?,
                     up: row.get("up")?,
+                    next_update_in: row.get("next_update_in")?,
                     last_update: row.get("last_update")?,
                 })
             })?
@@ -185,21 +190,22 @@ impl Database {
         &mut self,
         monitor_id: &str,
         up: bool,
-        seq_num: i64,
+        next_update_in: i64,
         now: i64,
     ) -> anyhow::Result<()> {
         let tx = self.connection.transaction()?;
         {
-            let mut stmt =
-                tx.prepare_cached("SELECT up, seq_num, last_update FROM monitor WHERE id = ?1")?;
+            let mut stmt = tx.prepare_cached(
+                "SELECT up, next_update_in, last_update FROM monitor WHERE id = ?1",
+            )?;
             match stmt.query_one([monitor_id], |row| {
                 Ok((
                     row.get::<_, bool>("up")?,
-                    row.get::<_, i64>("seq_num")?,
+                    row.get::<_, i64>("next_update_in")?,
                     row.get::<_, i64>("last_update")?,
                 ))
             }) {
-                Ok((mut old_up, old_seq_num, old_last_update)) => {
+                Ok((mut old_up, old_next_update_in, old_last_update)) => {
                     // Ensure update is actually newer compared to the previous database entry
                     if now <= old_last_update {
                         bail!(
@@ -210,12 +216,12 @@ impl Database {
 
                     // Update monitor status
                     tx.prepare_cached(
-                        "UPDATE monitor SET up = ?2, seq_num = ?3, last_update = ?4 WHERE id = ?1",
+                        "UPDATE monitor SET up = ?2, next_update_in = ?3, last_update = ?4 WHERE id = ?1",
                     )?
-                    .execute(params![monitor_id, up, seq_num, now])?;
+                    .execute(params![monitor_id, up, next_update_in, now])?;
 
                     // Detect if the monitor was down
-                    if old_seq_num + 1 != seq_num || old_last_update + 60 < now {
+                    if old_last_update + next_update_in.max(old_next_update_in) * 2 < now {
                         // check if there was an ongoing outage
                         if !old_up {
                             Self::end_ongoing_outage(&tx, monitor_id, old_last_update)?;
@@ -242,9 +248,9 @@ impl Database {
                 Err(rusqlite::Error::QueryReturnedNoRows) => {
                     // Add monitor
                     tx.prepare_cached(
-                        "INSERT INTO monitor (id, up, seq_num, last_update) VALUES (?, ?, ?, ?)",
+                        "INSERT INTO monitor (id, up, next_update_in, last_update) VALUES (?, ?, ?, ?)",
                     )?
-                    .execute(params![monitor_id, up, seq_num, now])?;
+                    .execute(params![monitor_id, up, next_update_in, now])?;
 
                     // Add untracked outage from the beginning of time
                     tx.prepare_cached("INSERT INTO outages (monitor_id, start, end, untracked) VALUES (?, ?, ?, ?)")?
@@ -262,6 +268,10 @@ impl Database {
         tx.commit()?;
         Ok(())
     }
+
+    fn backup(&mut self, path: impl AsRef<Path>) -> anyhow::Result<()> {
+        Ok(self.connection.backup(MAIN_DB, path, None)?)
+    }
 }
 
 enum DatabaseMessage {
@@ -274,6 +284,7 @@ enum DatabaseMessage {
         Option<bool>,
         Option<String>,
     ),
+    Backup(oneshot::Sender<anyhow::Result<()>>, PathBuf),
 }
 
 #[derive(Debug, Clone)]
@@ -282,9 +293,9 @@ pub(crate) struct DatabaseHandle {
 }
 
 impl DatabaseHandle {
-    pub fn new() -> anyhow::Result<Self> {
+    pub fn new(db_path: impl AsRef<Path>) -> anyhow::Result<Self> {
         let (sender, mut receiver) = mpsc::unbounded_channel();
-        let mut database = Database::new()?;
+        let mut database = Database::new(db_path)?;
 
         tokio::spawn(async move {
             while let Some(message) = receiver.recv().await {
@@ -292,9 +303,19 @@ impl DatabaseHandle {
                     DatabaseMessage::GetOverallStatus(tx) => {
                         let _ = tx.send(database.get_overall_status());
                     }
-                    DatabaseMessage::UpdateStatus(tx, monitor_id, up, seq_num, last_update) => {
-                        let _ =
-                            tx.send(database.update_status(&monitor_id, up, seq_num, last_update));
+                    DatabaseMessage::UpdateStatus(
+                        tx,
+                        monitor_id,
+                        up,
+                        next_update_in,
+                        last_update,
+                    ) => {
+                        let _ = tx.send(database.update_status(
+                            &monitor_id,
+                            up,
+                            next_update_in,
+                            last_update,
+                        ));
                     }
                     DatabaseMessage::PatchOutageInfo(tx, monitor_id, start, excluded, notes) => {
                         let _ = tx.send(database.patch_outage_info(
@@ -303,6 +324,9 @@ impl DatabaseHandle {
                             excluded,
                             notes,
                         ));
+                    }
+                    DatabaseMessage::Backup(tx, dest_path) => {
+                        let _ = tx.send(database.backup(dest_path));
                     }
                 }
             }
@@ -315,11 +339,11 @@ impl DatabaseHandle {
         &self,
         monitor_id: impl Into<String>,
         up: bool,
-        seq_num: i64,
+        next_update_in: i64,
     ) -> anyhow::Result<()> {
         let now = SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs() as i64;
         let (tx, rx) = oneshot::channel();
-        let message = DatabaseMessage::UpdateStatus(tx, monitor_id.into(), up, seq_num, now);
+        let message = DatabaseMessage::UpdateStatus(tx, monitor_id.into(), up, next_update_in, now);
         self.sender.send(message)?;
         rx.await?
     }
@@ -340,6 +364,13 @@ impl DatabaseHandle {
         let (tx, rx) = oneshot::channel();
         let message =
             DatabaseMessage::PatchOutageInfo(tx, monitor_id.into(), start, excluded, notes);
+        self.sender.send(message)?;
+        rx.await?
+    }
+
+    pub async fn backup(&self, dest_path: impl Into<PathBuf>) -> anyhow::Result<()> {
+        let (tx, rx) = oneshot::channel();
+        let message = DatabaseMessage::Backup(tx, dest_path.into());
         self.sender.send(message)?;
         rx.await?
     }

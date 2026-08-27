@@ -4,25 +4,31 @@ use axum::{
 };
 use monitor::Monitor;
 use std::time::Duration;
-use tracing_subscriber::FmtSubscriber;
+use tracing_subscriber::{EnvFilter, fmt, layer::SubscriberExt, util::SubscriberInitExt};
 
 use crate::{
-    config::{TAPO_PASSWORD, TAPO_PLUG_IP, TAPO_USERNAME},
+    config::{
+        DB_BACKUP_PATH, DB_PATH, SFTP_PRIVATE_KEY, SFTP_SERVER, SFTP_SERVER_FINGERPRINT,
+        SFTP_SERVER_FINGERPRINT_ALGO, SFTP_USERNAME, TAPO_PASSWORD, TAPO_PLUG_IP, TAPO_USERNAME,
+    },
     database::DatabaseHandle,
-    monitor::{InternetMonitor, TapoPowerMonitor},
+    monitor::{BackupMonitor, InternetMonitor, TapoPowerMonitor},
 };
 use tokio::time::{Instant, sleep};
 mod config;
 mod database;
 mod monitor;
 mod routes;
+mod sftp;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    let subscriber = FmtSubscriber::new();
-    tracing::subscriber::set_global_default(subscriber)?;
+    tracing_subscriber::registry()
+        .with(fmt::layer())
+        .with(EnvFilter::from_default_env())
+        .init();
 
-    let database = DatabaseHandle::new()?;
+    let database = DatabaseHandle::new(DB_PATH)?;
 
     let tapo_power = TapoPowerMonitor::new(
         TAPO_USERNAME,
@@ -31,32 +37,46 @@ async fn main() -> anyhow::Result<()> {
         Duration::from_secs(5),
     );
 
-    let internet = InternetMonitor::new();
+    let internet = InternetMonitor::default();
 
-    let monitors: Vec<(&'static str, Box<dyn Monitor + Send>, u64)> = vec![
-        ("power", Box::new(tapo_power), 10),
-        ("internet", Box::new(internet), 10),
+    let backup = BackupMonitor::new(
+        database.clone(),
+        DB_BACKUP_PATH,
+        SFTP_SERVER,
+        SFTP_SERVER_FINGERPRINT,
+        SFTP_SERVER_FINGERPRINT_ALGO,
+        SFTP_USERNAME,
+        SFTP_PRIVATE_KEY,
+    )?;
+
+    let monitors: Vec<(&'static str, Box<dyn Monitor + Send>, Duration)> = vec![
+        ("power", Box::new(tapo_power), Duration::from_secs(10)),
+        ("internet", Box::new(internet), Duration::from_secs(10)),
+        ("backup", Box::new(backup), Duration::from_hours(1)),
     ];
 
     for (monitor_id, mut monitor, interval) in monitors.into_iter() {
         let database = database.clone();
         tokio::spawn(async move {
-            let mut seq_num = 0;
             loop {
                 let start_time = Instant::now();
                 let timeout = monitor.timeout_interval();
                 let up = tokio::select! {
-                    result = monitor.get_status() => result.is_ok(),
+                    result = monitor.get_status() => {
+                        result.map_err(|e| tracing::debug!("Monitor down: {e}")).is_ok()
+                    },
                     _ = sleep(timeout) => false
                 };
-                if let Err(e) = database.update_status(monitor_id, up, seq_num).await {
+                if let Err(e) = database
+                    .update_status(monitor_id, up, (timeout + interval).as_secs() as i64)
+                    .await
+                {
                     tracing::error!("Failed to update db with status: {e}")
                 }
                 let elapsed = start_time.elapsed();
-                if elapsed < Duration::from_secs(interval) {
-                    sleep(Duration::from_secs(interval) - elapsed).await;
+                if elapsed < interval {
+                    sleep(interval - elapsed).await;
                 }
-                seq_num += 1;
             }
         });
     }

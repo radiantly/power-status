@@ -9,7 +9,9 @@
 import {
   DAY_COUNT,
   MAJOR_OUTAGE_SECONDS,
-  STALE_AFTER_SECONDS,
+  POLL_INTERVAL_MS,
+  PUBLIC_MONITORS,
+  STALE_UPDATE_FACTOR,
   UNTRACKED_DAY_RATIO,
 } from "./config.js";
 import { humanizeId } from "./format.js";
@@ -111,7 +113,11 @@ function buildDayCell(day, outages, now) {
 }
 
 function monitorState(monitor, now) {
-  if (now - monitor.last_update > STALE_AFTER_SECONDS) return MonitorState.Unknown;
+  if (
+    now - monitor.last_update >
+    monitor.next_update_in * STALE_UPDATE_FACTOR + POLL_INTERVAL_MS / 1000
+  )
+    return MonitorState.Unknown;
   return monitor.up ? MonitorState.Operational : MonitorState.Down;
 }
 
@@ -137,6 +143,14 @@ function groupByMonitor(outages) {
   }
   return grouped;
 }
+
+/**
+ * The freshest report the view is built on, or null before anything has been
+ * recorded. The maximum rather than the minimum: this dates the page's data as
+ * a whole, and a monitor that has fallen behind says so on its own card.
+ */
+const lastReport = (monitors) =>
+  monitors.length ? Math.max(...monitors.map((monitor) => monitor.lastUpdate)) : null;
 
 function overallSummary(monitors) {
   const down = monitors.filter((monitor) => monitor.state === MonitorState.Down);
@@ -220,31 +234,40 @@ function buildOutageEntry(outage, label, windowStart, now) {
   };
 }
 
-/** Raw payload -> view model. */
-export function buildView(payload, now) {
+/**
+ * Raw payload -> view model.
+ *
+ * `visible` names which monitors the view is built from, and in what order; the
+ * admin page passes a wider list than the public page's default. A whitelisted
+ * monitor the server has never recorded is skipped rather than shown as
+ * unknown, since it has reported no cadence to be judged against.
+ */
+export function buildView(payload, now, visible = PUBLIC_MONITORS) {
   const days = buildDayGrid(now, DAY_COUNT);
   const windowStart = days[0].start;
+  const rowsById = new Map((payload.monitors ?? []).map((row) => [row.monitor_id, row]));
   const outagesByMonitor = groupByMonitor(payload.outages ?? []);
 
-  const monitors = (payload.monitors ?? [])
-    .map((monitor) =>
-      buildMonitor(monitor, outagesByMonitor.get(monitor.monitor_id) ?? [], days, now),
-    )
-    .sort((a, b) => a.label.localeCompare(b.label));
+  const monitors = visible
+    .filter((id) => rowsById.has(id))
+    .map((id) => buildMonitor(rowsById.get(id), outagesByMonitor.get(id) ?? [], days, now));
 
   const labels = new Map(monitors.map((monitor) => [monitor.id, monitor.label]));
 
   const recent = (payload.outages ?? [])
-    .filter((outage) => !isPreHistory(outage) && outageEnd(outage, now) > windowStart)
-    .map((outage) =>
-      buildOutageEntry(
-        outage,
-        labels.get(outage.monitor_id) ?? humanizeId(outage.monitor_id),
-        windowStart,
-        now,
-      ),
+    .filter(
+      (outage) =>
+        labels.has(outage.monitor_id) &&
+        !isPreHistory(outage) &&
+        outageEnd(outage, now) > windowStart,
     )
+    .map((outage) => buildOutageEntry(outage, labels.get(outage.monitor_id), windowStart, now))
     .sort((a, b) => b.start - a.start || a.monitorLabel.localeCompare(b.monitorLabel));
 
-  return { monitors, overall: overallSummary(monitors), recent };
+  return {
+    monitors,
+    overall: overallSummary(monitors),
+    recent,
+    lastUpdate: lastReport(monitors),
+  };
 }
