@@ -22,7 +22,12 @@ export default function MonitorCard({ monitor, now }) {
   return (
     <section className="rounded-lg border border-line bg-surface p-4 sm:p-5">
       <header className="mb-3 flex items-baseline justify-between gap-3">
-        <h2 className="font-medium text-ink">{monitor.label}</h2>
+        <div className="min-w-0">
+          <h2 className="font-medium text-ink">{monitor.label}</h2>
+          {monitor.description && (
+            <p className="mt-0.5 text-xs text-muted">{monitor.description}</p>
+          )}
+        </div>
         <StatePill state={monitor.state}>{currentStateLabel(monitor, now)}</StatePill>
       </header>
 

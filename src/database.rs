@@ -161,19 +161,29 @@ impl Database {
         &self,
         monitor_id: &str,
         start: i64,
-        excluded: Option<bool>,
-        notes: Option<String>,
+        excluded: Option<Option<bool>>,
+        notes: Option<Option<String>>,
     ) -> anyhow::Result<PatchOutcome> {
+        let (set_excluded, excluded) = (excluded.is_some(), excluded.flatten());
+        let (set_notes, notes) = (notes.is_some(), notes.flatten());
+
         let result = self
             .connection
             .prepare_cached(
                 "INSERT INTO outage_info (monitor_id, start, excluded, notes)
-                 VALUES (?1, ?2, ?3, ?4)
+                 VALUES (?1, ?2, ?3, ?5)
                  ON CONFLICT (monitor_id, start) DO UPDATE SET
-                     excluded = COALESCE(?3, excluded),
-                     notes    = COALESCE(?4, notes)",
+                     excluded = CASE WHEN ?4 THEN ?3 ELSE excluded END,
+                     notes    = CASE WHEN ?6 THEN ?5 ELSE notes END",
             )?
-            .execute(params![monitor_id, start, excluded, notes]);
+            .execute(params![
+                monitor_id,
+                start,
+                excluded,
+                set_excluded,
+                notes,
+                set_notes
+            ]);
 
         match result {
             Ok(_) => Ok(PatchOutcome::Updated),
@@ -281,8 +291,8 @@ enum DatabaseMessage {
         oneshot::Sender<anyhow::Result<PatchOutcome>>,
         String,
         i64,
-        Option<bool>,
-        Option<String>,
+        Option<Option<bool>>,
+        Option<Option<String>>,
     ),
     Backup(oneshot::Sender<anyhow::Result<()>>, PathBuf),
 }
@@ -358,8 +368,8 @@ impl DatabaseHandle {
         &self,
         monitor_id: impl Into<String>,
         start: i64,
-        excluded: Option<bool>,
-        notes: Option<String>,
+        excluded: Option<Option<bool>>,
+        notes: Option<Option<String>>,
     ) -> anyhow::Result<PatchOutcome> {
         let (tx, rx) = oneshot::channel();
         let message =

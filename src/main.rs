@@ -1,5 +1,6 @@
 use axum::{
     Router,
+    middleware::from_fn,
     routing::{get, patch},
 };
 use monitor::Monitor;
@@ -15,6 +16,7 @@ use crate::{
     monitor::{BackupMonitor, InternetMonitor, TapoPowerMonitor},
 };
 use tokio::time::{Instant, sleep};
+mod auth;
 mod config;
 mod database;
 mod monitor;
@@ -85,7 +87,7 @@ async fn main() -> anyhow::Result<()> {
         .route("/status", get(routes::get_outages))
         .route(
             "/monitors/{monitor_id}/outages/{start}",
-            patch(routes::patch_outage_info),
+            patch(routes::patch_outage_info).route_layer(from_fn(auth::require_admin_password)),
         )
         .with_state(database);
 

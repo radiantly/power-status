@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 
 import { fetchStatus } from "../api/status.js";
 import { POLL_INTERVAL_MS, REQUEST_TIMEOUT_MS } from "../domain/config.js";
@@ -17,8 +17,12 @@ import { POLL_INTERVAL_MS, REQUEST_TIMEOUT_MS } from "../domain/config.js";
  * superseded, or the hook unmounted, and applies nothing. Being superseded is
  * not a failure and sets no error phase; timing out is, and does.
  *
+ * `refresh` polls immediately, for a caller that has just written something and
+ * should not have to wait out the interval. It restarts the schedule rather
+ * than adding to it, so repeated edits cannot stack up overlapping timers.
+ *
  * @returns {{ phase: 'loading' | 'ready' | 'stale' | 'error', data: object | null,
- *             error: Error | null, fetchedAt: number | null }}
+ *             error: Error | null, fetchedAt: number | null, refresh: () => void }}
  */
 export function useStatus() {
   const [result, setResult] = useState({
@@ -27,6 +31,7 @@ export function useStatus() {
     error: null,
     fetchedAt: null,
   });
+  const [epoch, setEpoch] = useState(0);
 
   useEffect(() => {
     let inFlight = null;
@@ -61,7 +66,9 @@ export function useStatus() {
       inFlight = null;
       clearInterval(timer);
     };
-  }, []);
+  }, [epoch]);
 
-  return result;
+  const refresh = useCallback(() => setEpoch((previous) => previous + 1), []);
+
+  return { ...result, refresh };
 }

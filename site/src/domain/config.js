@@ -5,15 +5,27 @@
  */
 
 /**
- * Monitors shown on the public page, in the order they are rendered.
+ * Every monitor the page knows how to describe, keyed by the id the server
+ * records it under.
  *
- * Membership and order in one list. The payload carries every monitor the
- * server records, internal ones included -- the hourly backup belongs on the
- * admin page rather than here -- and anything absent from this list is dropped
- * whole: its card, its rows in the outage log, and its say in the overall
- * banner.
+ * The description is editorial: the server reports only up, down and a
+ * reporting cadence, so what a monitor actually watches is named here with the
+ * rest of the display vocabulary.
  */
-export const PUBLIC_MONITORS = ["power", "internet"];
+export const MONITORS = {
+  power: { description: "Tapo P110" },
+  internet: { description: "ICMP Echo to 1.1.1.1, 8.8.8.8" },
+  backup: { description: "Hourly backups of the status database to rsync.net" },
+};
+
+/**
+ * The monitors the page draws, in the order they are drawn.
+ *
+ * Membership and order in one list, and deliberately not the registry's own
+ * order. Anything absent from this list is dropped whole: its card, its rows in
+ * the outage log, and its say in the overall banner.
+ */
+export const SHOWN_MONITORS = ["internet", "power", "backup"];
 
 /** Days of history shown and aggregated over. */
 export const DAY_COUNT = 90;

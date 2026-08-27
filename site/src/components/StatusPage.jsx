@@ -1,15 +1,22 @@
+import { UnauthorizedError, patchOutageInfo } from "../api/status.js";
+import { formatDuration, formatIso } from "../domain/format.js";
 import { buildView } from "../domain/status.js";
+import { useAdmin } from "../hooks/useAdmin.js";
 import { useNow } from "../hooks/useNow.js";
 import { useStatus } from "../hooks/useStatus.js";
+import AdminLock from "./AdminLock.jsx";
 import Legend from "./Legend.jsx";
 import MonitorCard from "./MonitorCard.jsx";
 import OverallBanner from "./OverallBanner.jsx";
 import RecentOutages from "./RecentOutages.jsx";
 
-function Shell({ children, footer }) {
+function Shell({ action, children, footer }) {
   return (
     <div className="mx-auto min-h-dvh w-full max-w-3xl px-4 py-10 sm:px-6 sm:py-14">
-      <h1 className="mb-6 text-xl font-semibold text-ink sm:text-2xl">Status</h1>
+      <div className="mb-6 flex items-center justify-between gap-3">
+        <h1 className="text-xl font-semibold text-ink sm:text-2xl">Status</h1>
+        {action}
+      </div>
       <div className="space-y-4">{children}</div>
       {footer}
     </div>
@@ -27,12 +34,15 @@ function Notice({ children, tone = "muted" }) {
 }
 
 export default function StatusPage() {
-  const { phase, data, error } = useStatus();
+  const { phase, data, error, refresh } = useStatus();
   const now = useNow();
+  const admin = useAdmin();
+
+  const lock = <AdminLock unlocked={admin.unlocked} onUnlock={admin.unlock} onLock={admin.lock} />;
 
   if (phase === "loading") {
     return (
-      <Shell>
+      <Shell action={lock}>
         <Notice>Loading status…</Notice>
       </Shell>
     );
@@ -40,7 +50,7 @@ export default function StatusPage() {
 
   if (phase === "error") {
     return (
-      <Shell>
+      <Shell action={lock}>
         <Notice tone="error">Could not reach the status service. {error?.message}</Notice>
       </Shell>
     );
@@ -48,16 +58,38 @@ export default function StatusPage() {
 
   const view = buildView(data, now);
 
+  // The refetch is what puts a saved note back on screen: the row re-renders
+  // from the server's copy rather than from what was typed, so a write that did
+  // not land the way it was written shows as itself.
+  const save = async (outage, patch) => {
+    try {
+      await patchOutageInfo(outage.monitorId, outage.startedAt, patch, admin.password);
+    } catch (error) {
+      // A credential the server has stopped accepting is worse than none: it
+      // leaves the page offering controls that cannot work. Drop it, which
+      // closes the form and puts the lock back.
+      if (error instanceof UnauthorizedError) admin.lock();
+      throw error;
+    }
+
+    refresh();
+  };
+
   return (
     <Shell
+      action={lock}
       footer={
         <div className="mt-8 space-y-4">
           <Legend />
-          <RecentOutages outages={view.recent} />
-          <p className="text-xs text-muted">
-            Uptime excludes periods with no data, and those excluded by hand, rather than counting
-            them as healthy.
-          </p>
+          <RecentOutages outages={view.recent} onSave={admin.unlocked ? save : undefined} />
+          {view.lastUpdate != null && (
+            <p className="text-xs text-muted">
+              Last updated{" "}
+              <time dateTime={formatIso(view.lastUpdate)}>
+                {formatDuration(now - view.lastUpdate)} ago
+              </time>
+            </p>
+          )}
         </div>
       }
     >

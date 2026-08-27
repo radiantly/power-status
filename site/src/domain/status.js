@@ -9,8 +9,9 @@
 import {
   DAY_COUNT,
   MAJOR_OUTAGE_SECONDS,
+  MONITORS,
   POLL_INTERVAL_MS,
-  PUBLIC_MONITORS,
+  SHOWN_MONITORS,
   STALE_UPDATE_FACTOR,
   UNTRACKED_DAY_RATIO,
 } from "./config.js";
@@ -127,6 +128,7 @@ function buildMonitor(monitor, outages, days, now) {
   return {
     id: monitor.monitor_id,
     label: humanizeId(monitor.monitor_id),
+    description: MONITORS[monitor.monitor_id]?.description ?? null,
     state: monitorState(monitor, now),
     lastUpdate: monitor.last_update,
     ongoingSince: ongoing?.start ?? null,
@@ -224,12 +226,19 @@ function buildOutageEntry(outage, label, windowStart, now) {
 
   return {
     key: `${outage.monitor_id}:${outage.start}`,
+    // The row's identity in the database is (monitor_id, start). `start` above
+    // is clipped to the window for display, so the true one is carried too --
+    // a patch addressed to the clipped value would not match any row.
+    monitorId: outage.monitor_id,
+    startedAt: outage.start,
     monitorLabel: label,
     start,
     seconds,
     kind: outageKind(outage, seconds),
     ongoing: outage.end == null,
     clipped: outage.start < windowStart,
+    untracked: outage.untracked,
+    excluded: outage.excluded ?? null,
     notes: outage.notes ?? null,
   };
 }
@@ -237,12 +246,14 @@ function buildOutageEntry(outage, label, windowStart, now) {
 /**
  * Raw payload -> view model.
  *
- * `visible` names which monitors the view is built from, and in what order; the
- * admin page passes a wider list than the public page's default. A whitelisted
- * monitor the server has never recorded is skipped rather than shown as
+ * `visible` names which monitors the view is built from, and in what order. It
+ * governs the cards and the outage log alike, so a row never appears for a
+ * monitor with no card above it.
+ *
+ * A monitor the server has never recorded is skipped rather than carded as
  * unknown, since it has reported no cadence to be judged against.
  */
-export function buildView(payload, now, visible = PUBLIC_MONITORS) {
+export function buildView(payload, now, visible = SHOWN_MONITORS) {
   const days = buildDayGrid(now, DAY_COUNT);
   const windowStart = days[0].start;
   const rowsById = new Map((payload.monitors ?? []).map((row) => [row.monitor_id, row]));
@@ -252,16 +263,19 @@ export function buildView(payload, now, visible = PUBLIC_MONITORS) {
     .filter((id) => rowsById.has(id))
     .map((id) => buildMonitor(rowsById.get(id), outagesByMonitor.get(id) ?? [], days, now));
 
-  const labels = new Map(monitors.map((monitor) => [monitor.id, monitor.label]));
+  // Read off the monitors that were actually built rather than the list asked
+  // for, so a monitor the payload has outages but no row for cannot put rows in
+  // the log with no card above them.
+  const carded = new Set(monitors.map((monitor) => monitor.id));
 
   const recent = (payload.outages ?? [])
     .filter(
       (outage) =>
-        labels.has(outage.monitor_id) &&
+        carded.has(outage.monitor_id) &&
         !isPreHistory(outage) &&
         outageEnd(outage, now) > windowStart,
     )
-    .map((outage) => buildOutageEntry(outage, labels.get(outage.monitor_id), windowStart, now))
+    .map((outage) => buildOutageEntry(outage, humanizeId(outage.monitor_id), windowStart, now))
     .sort((a, b) => b.start - a.start || a.monitorLabel.localeCompare(b.monitorLabel));
 
   return {
