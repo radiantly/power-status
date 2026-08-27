@@ -5,6 +5,8 @@
 #   sudo systemctl enable --now power-status
 #   journalctl -u power-status -f
 #
+# Runs as root: no User= below, so nothing has to exist before it starts.
+#
 # The binary has the contents of src/config.rs compiled into it, private key
 # included, so neither it nor the checkout should be world-readable.
 
@@ -16,8 +18,6 @@ Wants=network-online.target
 [Service]
 Type=exec
 ExecStart=/opt/power-status/target/release/power-status
-User=power-status
-Group=power-status
 
 # DB_PATH and DB_BACKUP_PATH are relative ("./status.db"), so this decides
 # where the database lives. Without it systemd starts the process in / and it
@@ -32,14 +32,8 @@ Environment=RUST_LOG=info
 Restart=always
 RestartSec=5
 
-# The internet monitor pings 8.8.8.8 and 1.1.1.1. surge-ping asks for a
-# SOCK_DGRAM ICMP socket first and falls back to SOCK_RAW, and the datagram
-# form only works if this unit's GID falls inside net.ipv4.ping_group_range.
-# This grants the fallback so it works either way; without one of the two the
-# monitor reports down forever and says so only at debug level.
-AmbientCapabilities=CAP_NET_RAW
-CapabilityBoundingSet=CAP_NET_RAW
-
+# No capability grants needed: the raw ICMP socket the internet monitor falls
+# back to is root's already.
 NoNewPrivileges=yes
 PrivateTmp=yes
 ProtectHome=yes
