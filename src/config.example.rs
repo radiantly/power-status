@@ -7,6 +7,7 @@ pub(crate) const TAPO_USERNAME: &str = "hi@itsme.com";
 pub(crate) const TAPO_PASSWORD: &str = "imtheproblemitsme";
 pub(crate) const TAPO_PLUG_IP: &str = "192.168.1.63";
 
+pub(crate) const SFTP_ENABLE: bool = false;
 pub(crate) const SFTP_SERVER: &str = "backup.example.com";
 pub(crate) const SFTP_SERVER_FINGERPRINT: &str =
     "SHA256:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";

@@ -51,7 +51,7 @@ export function formatDuration(seconds) {
  * containing any downtime can never display as a flat 100%.
  */
 export function formatUptime(ratio) {
-  if (ratio == null) return "—";
+  if (ratio == null) return "N/A";
   return `${(Math.floor(ratio * 10_000) / 100).toFixed(2)}%`;
 }
 
@@ -67,20 +67,24 @@ export const humanizeId = (id) =>
  * "A", "A and B", "A, B and C" -- built by Intl so the separator and the final
  * conjunction follow the viewer's locale rather than a hardcoded " and ".
  */
-const LIST_LABEL = new Intl.ListFormat(undefined, { style: "long", type: "conjunction" });
+const LIST_LABEL = new Intl.ListFormat(undefined, {
+  style: "long",
+  type: "conjunction",
+});
 
 export const formatList = (items) => LIST_LABEL.format(items);
 
 /**
- * Fixed-width stamp for the outage list: "24 Aug, 03:11".
+ * Fixed-width stamp for the outage list: "Aug 29, 03:11".
  *
  * The locale is pinned deliberately. This column is rendered monospaced and
  * read as a table, so every row must occupy the same width -- a locale that
  * switched to 12-hour time or a different field order would ragged the column.
  * Prose dates elsewhere still follow the viewer's locale via formatDateTime.
  */
-const STAMP_DATE = new Intl.DateTimeFormat("en-GB", { day: "2-digit", month: "short" });
-const STAMP_TIME = new Intl.DateTimeFormat("en-GB", {
+const STAMP_DATE_TIME = new Intl.DateTimeFormat("en-US", {
+  day: "2-digit",
+  month: "short",
   hour: "2-digit",
   minute: "2-digit",
   hour12: false,
@@ -88,5 +92,5 @@ const STAMP_TIME = new Intl.DateTimeFormat("en-GB", {
 
 export function formatStamp(seconds) {
   const at = new Date(seconds * 1000);
-  return `${STAMP_DATE.format(at)}, ${STAMP_TIME.format(at)}`;
+  return STAMP_DATE_TIME.format(at);
 }

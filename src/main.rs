@@ -9,8 +9,9 @@ use tracing_subscriber::{EnvFilter, fmt, layer::SubscriberExt, util::SubscriberI
 
 use crate::{
     config::{
-        DB_BACKUP_PATH, DB_PATH, SFTP_PRIVATE_KEY, SFTP_SERVER, SFTP_SERVER_FINGERPRINT,
-        SFTP_SERVER_FINGERPRINT_ALGO, SFTP_USERNAME, TAPO_PASSWORD, TAPO_PLUG_IP, TAPO_USERNAME,
+        DB_BACKUP_PATH, DB_PATH, SFTP_ENABLE, SFTP_PRIVATE_KEY, SFTP_SERVER,
+        SFTP_SERVER_FINGERPRINT, SFTP_SERVER_FINGERPRINT_ALGO, SFTP_USERNAME, TAPO_PASSWORD,
+        TAPO_PLUG_IP, TAPO_USERNAME,
     },
     database::DatabaseHandle,
     monitor::{BackupMonitor, InternetMonitor, TapoPowerMonitor},
@@ -41,21 +42,23 @@ async fn main() -> anyhow::Result<()> {
 
     let internet = InternetMonitor::default();
 
-    let backup = BackupMonitor::new(
-        database.clone(),
-        DB_BACKUP_PATH,
-        SFTP_SERVER,
-        SFTP_SERVER_FINGERPRINT,
-        SFTP_SERVER_FINGERPRINT_ALGO,
-        SFTP_USERNAME,
-        SFTP_PRIVATE_KEY,
-    )?;
-
-    let monitors: Vec<(&'static str, Box<dyn Monitor + Send>, Duration)> = vec![
+    let mut monitors: Vec<(&'static str, Box<dyn Monitor + Send>, Duration)> = vec![
         ("power", Box::new(tapo_power), Duration::from_secs(10)),
         ("internet", Box::new(internet), Duration::from_secs(10)),
-        ("backup", Box::new(backup), Duration::from_hours(1)),
     ];
+
+    if SFTP_ENABLE {
+        let backup = BackupMonitor::new(
+            database.clone(),
+            DB_BACKUP_PATH,
+            SFTP_SERVER,
+            SFTP_SERVER_FINGERPRINT,
+            SFTP_SERVER_FINGERPRINT_ALGO,
+            SFTP_USERNAME,
+            SFTP_PRIVATE_KEY,
+        )?;
+        monitors.push(("backup", Box::new(backup), Duration::from_hours(1)));
+    }
 
     for (monitor_id, mut monitor, interval) in monitors.into_iter() {
         let database = database.clone();

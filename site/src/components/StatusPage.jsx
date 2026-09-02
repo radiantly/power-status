@@ -95,7 +95,7 @@ export default function StatusPage() {
     >
       <OverallBanner overall={view.overall} />
 
-      {phase === "stale" && <Notice>Showing the last known status — refreshing failed.</Notice>}
+      {phase === "stale" && <Notice>Failed to refresh. Showing the last known status.</Notice>}
 
       {view.monitors.map((monitor) => (
         <MonitorCard key={monitor.id} monitor={monitor} now={now} />

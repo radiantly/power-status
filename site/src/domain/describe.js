@@ -17,12 +17,18 @@ const formatRange = (segment, day) =>
 /**
  * The grey a bar shows covers both no-data and excluded spans, so the headline
  * names whichever accounted for more of the day; `details` breaks the two apart
- * whenever the day was a mix. A tie falls to "No data", the weaker claim.
+ * whenever the day was a mix. A tie falls to the no-data side, the weaker claim.
+ *
+ * That side splits again on how much of the day went unseen. "No data" is a
+ * statement about the whole day and is only made when the whole day went
+ * unobserved; a day the monitor saw a little of, but not enough to judge, gets
+ * the weaker "Insufficient data" and leaves the detail line to say how little.
  */
 function summaryLine(cell) {
   if (cell.down > 0) return `Down for ${formatDuration(cell.down)}`;
   if (cell.status !== DayStatus.Untracked) return "No downtime";
-  return cell.excluded > cell.noData ? "Excluded" : "No data";
+  if (cell.excluded > cell.noData) return "Excluded";
+  return cell.noData >= cell.tracked ? "No data" : "Insufficient data";
 }
 
 /**

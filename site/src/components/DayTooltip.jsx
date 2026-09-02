@@ -39,7 +39,7 @@ export default function DayTooltip({ cell, position }) {
         <ul className="mt-2 space-y-1 border-t border-line pt-2 text-muted">
           {notes.map((note) => (
             <li key={note.key}>
-              <span className="text-ink">{note.range}</span> — {note.text}
+              <span className="text-ink">{note.range}</span> {note.text}
             </li>
           ))}
         </ul>
