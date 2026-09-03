@@ -1,6 +1,15 @@
 @import "tailwindcss";
 
 /*
+ * Whether the pointer working the page is a finger.
+ *
+ * `pointer` describes the primary input rather than every input the device has,
+ * so a desktop with a touchscreen attached stays fine-pointered -- the right
+ * reading for a page that only moves a tooltip out of a thumb's way.
+ */
+@custom-variant coarse (@media (pointer: coarse));
+
+/*
  * Semantic tokens only. Components never reach for a raw palette colour, so the
  * light and dark schemes are defined in exactly one place.
  */

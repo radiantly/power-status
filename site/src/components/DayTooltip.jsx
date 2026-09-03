@@ -5,6 +5,11 @@ import { describeDay } from "../domain/describe.js";
 /**
  * Centred on its bar, sliding aside only as far as an edge demands.
  *
+ * It hangs below the strip for a mouse and above it for a finger, which would
+ * otherwise cover the thing it just opened -- the bar being described is the one
+ * under the fingertip, and everything worth reading sits within a thumb's width
+ * of it.
+ *
  * How far it may slide depends on the tooltip's own width, which varies with
  * content -- a day with a note wraps to the full cap, a bare one is half that.
  * So the bound is measured rather than assumed, and handed to clamp() in
@@ -26,7 +31,7 @@ export default function DayTooltip({ cell, position }) {
       ref={ref}
       role="tooltip"
       style={{ left: `clamp(${half}px, ${position * 100}%, calc(100% - ${half}px))` }}
-      className="pointer-events-none absolute top-full z-10 mt-2 w-max max-w-[min(18rem,100%)] -translate-x-1/2 rounded-md border border-line bg-surface px-3 py-2 text-xs shadow-lg"
+      className="pointer-events-none absolute top-full mt-2 coarse:top-auto coarse:bottom-full coarse:mt-0 coarse:mb-2 z-10 w-max max-w-[min(18rem,100%)] -translate-x-1/2 rounded-md border border-line bg-surface px-3 py-2 text-xs shadow-lg"
     >
       <p className="font-medium text-ink">{title}</p>
       <p className="mt-0.5 text-muted">{summary}</p>
