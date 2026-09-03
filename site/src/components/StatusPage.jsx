@@ -17,7 +17,22 @@ function Shell({ action, children, footer }) {
         <h1 className="text-xl font-semibold text-ink sm:text-2xl">Status</h1>
         {action}
       </div>
-      <div className="space-y-4">{children}</div>
+      <div className="space-y-4">
+        {/* The demo build answers its own requests from a fixture, so the page
+            has to say that the outages below never happened. Written against
+            the mode rather than anything at runtime: the comparison folds to
+            false in every other build, and nothing of this survives it. */}
+        {import.meta.env.MODE === "demo" && (
+          <Notice>
+            This is a demo of{" "}
+            <a className="underline" href="https://github.com/radiantly/power-status">
+              radiantly/power-status
+            </a>
+            ! Admin password is <code>demo</code>.
+          </Notice>
+        )}
+        {children}
+      </div>
       {footer}
     </div>
   );

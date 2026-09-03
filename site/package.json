@@ -5,11 +5,14 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "dev:demo": "vite --mode demo",
     "build": "vite build",
+    "build:demo": "vite build --mode demo",
     "format": "oxfmt",
     "format:check": "oxfmt --check",
     "lint": "oxlint",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "preview:demo": "vite preview --mode demo"
   },
   "dependencies": {
     "react": "^19.2.8",

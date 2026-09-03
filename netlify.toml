@@ -1,0 +1,7 @@
+[build]
+base = "site"
+command = "npm run build:demo"
+publish = "dist-demo"
+
+[build.environment]
+NODE_VERSION = "24"
