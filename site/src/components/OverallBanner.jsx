@@ -19,7 +19,9 @@ function headline({ state, down, unknown }) {
 
 export default function OverallBanner({ overall }) {
   return (
-    <div className={`rounded-lg border px-4 py-3 font-medium sm:px-5 ${BANNER[overall.state]}`}>
+    <div
+      className={`rounded-lg border px-[var(--card-pad)] py-3 font-medium ${BANNER[overall.state]}`}
+    >
       {headline(overall)}
     </div>
   );

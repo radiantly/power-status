@@ -12,7 +12,7 @@ import RecentOutages from "./RecentOutages.jsx";
 
 function Shell({ action, children, footer }) {
   return (
-    <div className="mx-auto min-h-dvh w-full max-w-3xl px-4 py-10 sm:px-6 sm:py-14">
+    <div className="mx-auto min-h-dvh w-[var(--page-w)] max-w-full py-10 sm:py-14">
       <div className="mb-6 flex items-center justify-between gap-3">
         <h1 className="text-xl font-semibold text-ink sm:text-2xl">Status</h1>
         {action}
@@ -29,7 +29,9 @@ function Notice({ children, tone = "muted" }) {
       ? "border-major bg-major-soft text-major"
       : "border-line bg-surface text-muted";
   return (
-    <div className={`rounded-lg border px-4 py-3 text-sm sm:px-5 ${className}`}>{children}</div>
+    <div className={`rounded-lg border px-[var(--card-pad)] py-3 text-sm ${className}`}>
+      {children}
+    </div>
   );
 }
 

@@ -53,3 +53,89 @@
 body {
   @apply font-sans bg-canvas text-ink antialiased;
 }
+
+/*
+ * The uptime strip's pixel geometry, and the page width derived from it.
+ *
+ * A strip is DAY_COUNT bars of exactly --bar-w, so the column holding it is
+ * measured to that run and nothing else. Any other width has to be divided by
+ * the bars, and a division that does not come out whole is settled by the
+ * browser's own 1/64px layout grid: neighbouring bars then differ by a
+ * sixty-fourth of a pixel. Whole-pixel bars in a column sized to hold them
+ * leave nothing to round.
+ *
+ * The ladder picks the widest bar the viewport affords. Each threshold is the
+ * body width that rung implies, plus a gutter either side:
+ *
+ *   body      = count * bar + (count - 1) * gap + 2 * card-pad + 2 (borders)
+ *   threshold = body + 2 * gutter
+ *
+ * A media query condition cannot read a custom property, so the thresholds are
+ * written out and the formula above is the only record of where they came
+ * from. They assume a DAY_COUNT of 90, and a gutter of 8px where the bars are
+ * thinnest and 16px elsewhere -- which also covers the scrollbar a media query
+ * does not always account for.
+ *
+ * --bar-gap narrows to 1px on the rungs where bars are thinnest, spending the
+ * pitch on the mark rather than on the space between marks. It widens once, on
+ * the way up, so bars never thin as the viewport grows.
+ */
+:root {
+  --bar-w: 1px;
+  --bar-gap: 1px;
+  --card-pad: 16px;
+
+  --page-w: calc(
+    var(--day-count) * var(--bar-w) + (var(--day-count) - 1) * var(--bar-gap) + 2 *
+      var(--card-pad) + 2px
+  );
+}
+
+/* 2px bars, 1px gaps: a 303px body inside a 319px viewport. */
+@media (min-width: 319px) {
+  :root {
+    --bar-w: 2px;
+  }
+}
+
+/* 3px bars: body 393. */
+@media (min-width: 409px) {
+  :root {
+    --bar-w: 3px;
+  }
+}
+
+/* Bars are wide enough to carry a 2px gap: body 482. */
+@media (min-width: 498px) {
+  :root {
+    --bar-gap: 2px;
+  }
+}
+
+/* 4px bars: body 572. */
+@media (min-width: 588px) {
+  :root {
+    --bar-w: 4px;
+  }
+}
+
+/* The card's own padding step, which widens the body to 580 mid-rung. */
+@media (min-width: 640px) {
+  :root {
+    --card-pad: 20px;
+  }
+}
+
+/* 5px bars: body 670. */
+@media (min-width: 702px) {
+  :root {
+    --bar-w: 5px;
+  }
+}
+
+/* 6px bars: body 760, the widest the page grows to. */
+@media (min-width: 792px) {
+  :root {
+    --bar-w: 6px;
+  }
+}

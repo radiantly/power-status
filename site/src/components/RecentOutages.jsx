@@ -87,7 +87,7 @@ function OutageEditor({ outage, onSave, onClose }) {
   }
 
   return (
-    <li className="bg-canvas px-4 py-3 sm:col-span-full sm:px-5">
+    <li className="bg-canvas px-[var(--card-pad)] py-3 sm:col-span-full">
       <form onSubmit={submit} className="grid gap-3">
         {/* The placeholder names the field, so the label is for screen readers
             only rather than a heading over a single obvious input. */}
@@ -170,7 +170,9 @@ export default function RecentOutages({ outages, onSave }) {
 
       <div className="overflow-hidden rounded-lg border border-line bg-surface">
         {outages.length === 0 ? (
-          <p className="p-4 text-sm text-muted sm:p-5">No outages in the last {DAY_COUNT} days.</p>
+          <p className="p-[var(--card-pad)] text-sm text-muted">
+            No outages in the last {DAY_COUNT} days.
+          </p>
         ) : (
           <ul className="divide-y divide-line sm:grid sm:grid-cols-[auto_auto_1fr_auto_auto] sm:gap-x-4">
             {outages.map((outage) => {
@@ -179,7 +181,7 @@ export default function RecentOutages({ outages, onSave }) {
 
               return (
                 <Fragment key={outage.key}>
-                  <li className="group grid min-h-16 grid-cols-[auto_auto_auto_1fr] items-center gap-x-2 px-4 py-3 sm:col-span-full sm:grid-cols-subgrid sm:gap-x-4 sm:gap-y-0 sm:px-5">
+                  <li className="group grid min-h-16 grid-cols-[auto_auto_auto_1fr] items-center gap-x-2 px-[var(--card-pad)] py-3 sm:col-span-full sm:grid-cols-subgrid sm:gap-x-4 sm:gap-y-0">
                     {/*
                       Spans both narrow rows, inset so it reads as a marker rather
                       than a divider. The insets are uneven on purpose: the first
