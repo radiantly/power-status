@@ -64,6 +64,7 @@ impl Database {
                 end         INTEGER NULL,
                 untracked   INTEGER NOT NULL,
                 PRIMARY KEY (monitor_id, start),
+                CHECK (end IS NULL OR end > start),
                 FOREIGN KEY (monitor_id) REFERENCES monitor(id)
                     ON DELETE CASCADE
                     ON UPDATE CASCADE

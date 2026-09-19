@@ -1,2 +1,3 @@
 /target
-/src/config.rs
+/src/config.*
+!/src/config.example.rs

@@ -1,0 +1,5 @@
+:80 {
+	root * /opt/power-status/site/dist
+	file_server
+	reverse_proxy /api/* localhost:3000
+}
