@@ -3,33 +3,35 @@ import { FiEdit2 } from "react-icons/fi";
 
 import { DAY_COUNT } from "../domain/config.js";
 import { formatDuration, formatIso, formatStamp } from "../domain/format.js";
-import { OutageKind } from "../domain/status.js";
+import { OutageKind, OutageTone, outageTone, toRows } from "../domain/status.js";
 import Pill from "./Pill.jsx";
 
-const KIND = {
-  [OutageKind.Major]: {
-    label: "Major",
+/**
+ * What a row is called, and how it is painted -- two questions of different
+ * shapes, so two tables rather than one repeating itself. Four kinds share
+ * three tones, and which kinds share one is OutageTone's to say: merging rows
+ * turns on the same fact, and a palette that restated it could drift from the
+ * rule without anything noticing.
+ */
+const LABEL = {
+  [OutageKind.Major]: "Major",
+  [OutageKind.Minor]: "Minor",
+  [OutageKind.NoData]: "No data",
+  [OutageKind.Excluded]: "Excluded",
+};
+
+const TONE = {
+  [OutageTone.Major]: {
     rule: "bg-major",
     pill: "bg-major-soft text-ink",
     dot: "bg-major",
   },
-  [OutageKind.Minor]: {
-    label: "Minor",
+  [OutageTone.Minor]: {
     rule: "bg-minor",
     pill: "bg-minor-soft text-ink",
     dot: "bg-minor",
   },
-  // NoData and Excluded are both grey on purpose: one span the monitor could
-  // not see and one a human waved off are equally absent from the uptime
-  // figure, and only the wording separates them.
-  [OutageKind.NoData]: {
-    label: "No data",
-    rule: "bg-untracked",
-    pill: "bg-untracked-soft text-ink",
-    dot: "bg-untracked",
-  },
-  [OutageKind.Excluded]: {
-    label: "Excluded",
+  [OutageTone.Untracked]: {
     rule: "bg-untracked",
     pill: "bg-untracked-soft text-ink",
     dot: "bg-untracked",
@@ -153,9 +155,17 @@ function OutageEditor({ outage, onSave, onClose }) {
  * over the same list would invite editing one while reading another. Without
  * `onSave` the list is read-only, which is what a client the API would refuse a
  * write from sees.
+ *
+ * It also decides whether neighbouring outages sharing a note are drawn as the
+ * one event they describe. Editing is the reason it is the same flag: an
+ * annotation belongs to a single outage, so the form needs a row that names
+ * one, and a merged row is precisely a row that has stopped doing that. Reading
+ * and editing therefore see the log differently on purpose -- unlocking it
+ * separates the merged rows into the records that are about to be written.
  */
 export default function RecentOutages({ outages, onSave }) {
   const [openKey, setOpenKey] = useState(null);
+  const rows = toRows(outages, { collapse: !onSave });
 
   // Locking mid-edit closes the form with the session that opened it. Without
   // this the form stays up and fully interactive after `onSave` goes away, and
@@ -169,18 +179,18 @@ export default function RecentOutages({ outages, onSave }) {
       </h2>
 
       <div className="overflow-hidden rounded-lg border border-line bg-surface">
-        {outages.length === 0 ? (
+        {rows.length === 0 ? (
           <p className="p-[var(--card-pad)] text-sm text-muted">
             No outages in the last {DAY_COUNT} days.
           </p>
         ) : (
           <ul className="divide-y divide-line sm:grid sm:grid-cols-[auto_auto_1fr_auto_auto] sm:gap-x-4">
-            {outages.map((outage) => {
-              const kind = KIND[outage.kind];
-              const open = openKey === outage.key;
+            {rows.map((row) => {
+              const tone = TONE[outageTone(row.kind)];
+              const open = openKey === row.key;
 
               return (
-                <Fragment key={outage.key}>
+                <Fragment key={row.key}>
                   <li className="group grid min-h-16 grid-cols-[auto_auto_auto_1fr] items-center gap-x-2 px-[var(--card-pad)] py-3 sm:col-span-full sm:grid-cols-subgrid sm:gap-x-4 sm:gap-y-0">
                     {/*
                       Spans both narrow rows, inset so it reads as a marker rather
@@ -190,14 +200,14 @@ export default function RecentOutages({ outages, onSave }) {
                       line box. Equal margins would therefore look bottom-heavy.
                     */}
                     <span
-                      className={`row-span-2 mt-1.5 mb-0.5 w-1 self-stretch rounded-full sm:col-[1] sm:row-[1] sm:my-1.5 ${kind.rule}`}
+                      className={`row-span-2 mt-1.5 mb-0.5 w-1 self-stretch rounded-full sm:col-[1] sm:row-[1] sm:my-1.5 ${tone.rule}`}
                     />
 
                     <time
-                      dateTime={formatIso(outage.start)}
+                      dateTime={formatIso(row.start)}
                       className="font-mono text-xs text-muted sm:col-[2] sm:row-[1]"
                     >
-                      {formatStamp(outage.start)}
+                      {formatStamp(row.start)}
                     </time>
 
                     {/*
@@ -206,9 +216,9 @@ export default function RecentOutages({ outages, onSave }) {
                       the duration sit on one line.
                     */}
                     <span className="font-mono text-xs text-muted before:mr-1.5 before:content-['·'] sm:col-[5] sm:row-[1] sm:text-right sm:before:content-none">
-                      {outage.clipped && "≥"}
-                      {formatDuration(outage.seconds)}
-                      {outage.ongoing && " · ongoing"}
+                      {row.clipped && "≥"}
+                      {formatDuration(row.seconds)}
+                      {row.ongoing && " · ongoing"}
                     </span>
 
                     {/*
@@ -228,9 +238,9 @@ export default function RecentOutages({ outages, onSave }) {
                       {onSave && (
                         <button
                           type="button"
-                          onClick={() => setOpenKey(open ? null : outage.key)}
+                          onClick={() => setOpenKey(open ? null : row.key)}
                           aria-expanded={open}
-                          aria-label={`Edit the ${outage.monitorLabel} outage from ${formatStamp(outage.start)}`}
+                          aria-label={`Edit the ${row.label} outage from ${formatStamp(row.start)}`}
                           className={`rounded-full p-1.5 transition hover:bg-untracked-soft hover:text-ink focus-visible:opacity-100 ${
                             open
                               ? "bg-untracked-soft text-ink opacity-100"
@@ -241,20 +251,23 @@ export default function RecentOutages({ outages, onSave }) {
                         </button>
                       )}
 
-                      <Pill className={kind.pill} dotClassName={kind.dot}>
-                        {kind.label}
+                      <Pill className={tone.pill} dotClassName={tone.dot}>
+                        {LABEL[row.kind]}
                       </Pill>
                     </div>
 
                     <div className="col-span-3 min-w-0 sm:col-[3] sm:row-[1]">
-                      <p className="text-sm font-semibold text-ink">{outage.monitorLabel}</p>
-                      {outage.notes && <p className="mt-0.5 text-xs text-muted">{outage.notes}</p>}
+                      <p className="text-sm font-semibold text-ink">{row.label}</p>
+                      {row.notes && <p className="mt-0.5 text-xs text-muted">{row.notes}</p>}
                     </div>
                   </li>
 
+                  {/* Safe to edit the first member alone: the form only ever
+                      opens while `onSave` is set, and that is the same flag
+                      that leaves every row a run of one. */}
                   {open && (
                     <OutageEditor
-                      outage={outage}
+                      outage={row.items[0]}
                       onSave={onSave}
                       onClose={() => setOpenKey(null)}
                     />

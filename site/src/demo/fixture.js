@@ -60,6 +60,12 @@ const HISTORY = [
   { monitor: "internet", from: [45, 2], seconds: 420 },
   { monitor: "internet", from: [34, 21], seconds: 240 },
   { monitor: "internet", from: [21, 13], seconds: 180 },
+  {
+    monitor: "internet",
+    from: [18, 23, 52],
+    seconds: 2400,
+    notes: "Storm damage to the overhead line.",
+  },
   // Under ten minutes: an orange day rather than a red one.
   { monitor: "internet", from: [10, 14, 30], seconds: 300 },
   {

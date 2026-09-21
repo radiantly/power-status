@@ -15,7 +15,7 @@ import {
   STALE_UPDATE_FACTOR,
   UNTRACKED_DAY_RATIO,
 } from "./config.js";
-import { humanizeId } from "./format.js";
+import { formatList, humanizeId } from "./format.js";
 import { buildDayGrid, overlap } from "./time.js";
 
 /** Severity of a single day's bar. */
@@ -56,6 +56,34 @@ export const OutageKind = {
   NoData: "no-data",
   Excluded: "excluded",
 };
+
+/**
+ * How severe an outage looks, as opposed to what it is called.
+ *
+ * Deliberately coarser than the kind: NoData and Excluded are one tone, because
+ * a span the monitor could not see and one a human waved off are equally absent
+ * from the uptime figure and only the wording separates them. These are the
+ * outage log's three-quarters of DayStatus -- the same vocabulary a bar uses,
+ * less Operational, which no logged interval can be.
+ *
+ * Stated here rather than left implicit in whichever palette happens to draw a
+ * row, because two things now depend on knowing it and they must not drift: the
+ * palette, and the rule deciding which neighbouring rows may be told as one.
+ */
+export const OutageTone = {
+  Major: "major",
+  Minor: "minor",
+  Untracked: "untracked",
+};
+
+const TONE = {
+  [OutageKind.Major]: OutageTone.Major,
+  [OutageKind.Minor]: OutageTone.Minor,
+  [OutageKind.NoData]: OutageTone.Untracked,
+  [OutageKind.Excluded]: OutageTone.Untracked,
+};
+
+export const outageTone = (kind) => TONE[kind];
 
 /**
  * Whether an outage counts against uptime.
@@ -286,4 +314,100 @@ export function buildView(payload, now, visible = SHOWN_MONITORS) {
     recent,
     lastUpdate: lastReport(monitors),
   };
+}
+
+/**
+ * Whether two neighbouring entries are one event told twice.
+ *
+ * A note is a person's account of what happened, so the same note on two
+ * outages says they share a cause -- most often one cut that took out the power
+ * and the internet together, logged once per monitor. An absent note says
+ * nothing at all and so can never be that evidence.
+ *
+ * Tone rather than kind, because a merged row shows one pill and the pill is
+ * what the reader believes: folding a major outage into a minor one would
+ * misstate whichever lost. Two kinds share the untracked tone, so a no-data
+ * stretch and an excluded one do merge -- see OutageTone.
+ *
+ * Neighbouring in the list, not merely somewhere in it: anything that happened
+ * between the two is a reason to doubt they were the same event, and the list
+ * is ordered so that "between" is simply the row in between.
+ */
+const sameEvent = (a, b) =>
+  Boolean(a.notes) && a.notes === b.notes && outageTone(a.kind) === outageTone(b.kind);
+
+/**
+ * What a merged row is called, where its members may disagree.
+ *
+ * Only the untracked tone can disagree at all, since the other two are single
+ * kinds. There, excluded wins: the run contains a judgement somebody made by
+ * hand, and a row that said "no data" would bury it. The weaker word is kept
+ * only for a run where nothing was ever judged.
+ */
+function rowKind(items) {
+  const kind = items[0].kind;
+  if (kind !== OutageKind.NoData && kind !== OutageKind.Excluded) return kind;
+  return items.every((item) => item.kind === OutageKind.NoData)
+    ? OutageKind.NoData
+    : OutageKind.Excluded;
+}
+
+/** The monitors a row speaks for, in the list's own tiebreak order. */
+const rowLabel = (items) =>
+  formatList(
+    [...new Set(items.map((item) => item.monitorLabel))].sort((a, b) => a.localeCompare(b)),
+  );
+
+/**
+ * A run of entries as one row.
+ *
+ * The span runs from the earliest start to the latest end, which is what an
+ * event lasted -- not the sum of its members, since two monitors that went down
+ * together were down once, not twice. A run of one is its own span, so a merged
+ * row reads exactly like an unmerged one: the timestamp is the moment the row's
+ * duration is measured from, whether one outage or several are behind it.
+ */
+function buildRow(items) {
+  // The list runs newest first, so the run's last member is the one that began
+  // first.
+  const earliest = items.at(-1);
+  const end = Math.max(...items.map((item) => item.start + item.seconds));
+
+  return {
+    key: earliest.key,
+    label: rowLabel(items),
+    notes: earliest.notes,
+    start: earliest.start,
+    seconds: end - earliest.start,
+    kind: rowKind(items),
+    ongoing: items.some((item) => item.ongoing),
+    clipped: items.some((item) => item.clipped),
+    items,
+  };
+}
+
+/**
+ * The outage log's rows.
+ *
+ * Uniform by construction: every row carries the entries behind it, and a row
+ * that merged nothing is a run of one, so the list has a single shape to draw
+ * and no separate case for the common one.
+ *
+ * `collapse` is the caller's, because merging is a reading of the log rather
+ * than a fact about it -- and one the log cannot afford while it is being
+ * edited. Annotations are stored per outage, so an edit has to name one, and a
+ * merged row deliberately no longer says which ones it stands for.
+ */
+export function toRows(entries, { collapse = true } = {}) {
+  const runs = [];
+
+  for (const entry of entries) {
+    const run = runs.at(-1);
+    // Both halves of sameEvent are equalities, so a run is homogeneous and its
+    // last member can speak for the whole of it.
+    if (collapse && run && sameEvent(run.at(-1), entry)) run.push(entry);
+    else runs.push([entry]);
+  }
+
+  return runs.map(buildRow);
 }
