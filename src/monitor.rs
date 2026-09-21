@@ -1,41 +1,74 @@
-use anyhow::{Result, bail};
+use anyhow::{Result, anyhow};
 use async_trait::async_trait;
 use rand::random;
 use russh::keys::{Algorithm, PrivateKey, decode_secret_key, ssh_key::Fingerprint};
 use russh_sftp::protocol::OpenFlags;
-use std::{fs, path::PathBuf, str::FromStr, sync::Arc, time::Duration};
+use std::{
+    fs,
+    net::{IpAddr, Ipv4Addr},
+    path::PathBuf,
+    str::FromStr,
+    sync::Arc,
+    time::Duration,
+};
 use surge_ping::{Client, Config, PingIdentifier, PingSequence};
 use tapo::ApiClient;
-use tokio::io::AsyncWriteExt;
+use tokio::{io::AsyncWriteExt, task::JoinSet};
 
 use crate::{database::DatabaseHandle, sftp::SftpClient};
 
 #[async_trait]
 pub(crate) trait Monitor {
     fn timeout_interval(&self) -> Duration;
-    async fn get_status(&mut self) -> Result<()>;
+    async fn get_status(&mut self) -> Result<(), MonitorError>;
+}
+
+pub(crate) enum MonitorError {
+    Down(anyhow::Error),
+    Indeterminate(anyhow::Error),
 }
 
 pub(crate) struct TapoPowerMonitor {
+    ip_addr: String,
     username: String,
     password: String,
-    ip_addr: String,
+    gateway: IpAddr,
     timeout: Duration,
 }
 
 impl TapoPowerMonitor {
+    const GATEWAY_TIMEOUT: Duration = Duration::from_secs(1);
+    const GATEWAY_RETRIES: u16 = 1;
+
     pub(crate) fn new(
+        ip_addr: IpAddr,
         username: impl Into<String>,
         password: impl Into<String>,
-        ip_addr: impl Into<String>,
+        gateway: IpAddr,
         timeout: Duration,
     ) -> Self {
         TapoPowerMonitor {
+            ip_addr: ip_addr.to_string(),
             username: username.into(),
             password: password.into(),
-            ip_addr: ip_addr.into(),
+            gateway,
             timeout,
         }
+    }
+
+    async fn ping_gateway(&self) -> Result<()> {
+        let client = Client::new(&Config::default())?;
+        let mut pinger = client.pinger(self.gateway, PingIdentifier(random())).await;
+        pinger.timeout(Self::GATEWAY_TIMEOUT);
+
+        let mut last_error = None;
+        for sequence in 0..=Self::GATEWAY_RETRIES {
+            match pinger.ping(PingSequence(sequence), &[0; 56]).await {
+                Ok(_) => return Ok(()),
+                Err(error) => last_error = Some(error),
+            }
+        }
+        Err(last_error.unwrap().into())
     }
 }
 
@@ -43,18 +76,60 @@ impl TapoPowerMonitor {
 impl Monitor for TapoPowerMonitor {
     fn timeout_interval(&self) -> Duration {
         // the ApiClient has timeout built-in, so the hard timeout should typically never be required to be called
-        self.timeout + Duration::from_secs(1)
+        self.timeout
+            .max(Self::GATEWAY_TIMEOUT * u32::from(Self::GATEWAY_RETRIES + 1))
+            + Duration::from_secs(1)
     }
 
-    async fn get_status(&mut self) -> Result<()> {
+    async fn get_status(&mut self) -> Result<(), MonitorError> {
         let client = ApiClient::new(&self.username, &self.password).with_timeout(self.timeout);
-        let _plug_handler = client.p110(&self.ip_addr).await?;
-        Ok(())
+
+        let (gateway_result, plug_result) =
+            tokio::join!(self.ping_gateway(), client.p110(&self.ip_addr));
+
+        if let Err(err) = gateway_result {
+            return Err(MonitorError::Indeterminate(err));
+        }
+
+        match plug_result {
+            Ok(_) => Ok(()),
+            Err(err) => Err(MonitorError::Down(err.into())),
+        }
     }
 }
 
 #[derive(Default, Debug)]
 pub(crate) struct InternetMonitor;
+
+impl InternetMonitor {
+    const HOSTS: [IpAddr; 2] = [
+        IpAddr::V4(Ipv4Addr::new(1, 1, 1, 1)),
+        IpAddr::V4(Ipv4Addr::new(8, 8, 8, 8)),
+    ];
+    const PING_TIMEOUT: Duration = Duration::from_secs(1);
+
+    async fn ping_hosts(&self) -> Result<()> {
+        let client = Client::new(&Config::default())?;
+        let mut ping_set = JoinSet::new();
+        for host in Self::HOSTS.iter() {
+            let mut pinger = client.pinger(*host, PingIdentifier(random())).await;
+            pinger.timeout(Self::PING_TIMEOUT);
+
+            ping_set.spawn(async move { pinger.ping(PingSequence(0), &[0; 56]).await });
+        }
+
+        let mut last_error = None;
+        while let Some(result) = ping_set.join_next().await {
+            match result {
+                Ok(Ok(_)) => return Ok(()),
+                Ok(Err(err)) => last_error = Some(anyhow::Error::from(err)),
+                Err(err) => last_error = Some(anyhow::Error::from(err)),
+            }
+        }
+
+        Err(last_error.unwrap_or_else(|| anyhow!("no ping tasks were spawned")))
+    }
+}
 
 #[async_trait]
 impl Monitor for InternetMonitor {
@@ -62,24 +137,11 @@ impl Monitor for InternetMonitor {
         Duration::from_secs(5)
     }
 
-    async fn get_status(&mut self) -> Result<()> {
-        let client = Client::new(&Config::default())?;
-        let mut pinger1 = client
-            .pinger("8.8.8.8".parse()?, PingIdentifier(random()))
-            .await;
-        pinger1.timeout(Duration::from_secs(1));
-
-        let mut pinger2 = client
-            .pinger("1.1.1.1".parse()?, PingIdentifier(random()))
-            .await;
-        pinger2.timeout(Duration::from_secs(1));
-
-        tokio::select! {
-            Ok(_) = pinger1.ping(PingSequence(0), &[0; 56]) => {}
-            Ok(_) = pinger2.ping(PingSequence(0), &[0; 56]) => {}
-            else => bail!("failed")
-        };
-        Ok(())
+    async fn get_status(&mut self) -> Result<(), MonitorError> {
+        match self.ping_hosts().await {
+            Ok(_) => Ok(()),
+            Err(err) => Err(MonitorError::Down(err)),
+        }
     }
 }
 
@@ -118,15 +180,8 @@ impl BackupMonitor {
             private_key,
         })
     }
-}
 
-#[async_trait]
-impl Monitor for BackupMonitor {
-    fn timeout_interval(&self) -> Duration {
-        Duration::from_mins(10)
-    }
-
-    async fn get_status(&mut self) -> Result<()> {
+    async fn backup_db(&mut self) -> Result<()> {
         self.database.backup(&self.backup_database_path).await?;
         let bytes = fs::read(&self.backup_database_path)?;
         fs::remove_file(&self.backup_database_path)?;
@@ -155,5 +210,19 @@ impl Monitor for BackupMonitor {
         sftp.rename("status.db.tmp", "status.db").await?;
 
         Ok(())
+    }
+}
+
+#[async_trait]
+impl Monitor for BackupMonitor {
+    fn timeout_interval(&self) -> Duration {
+        Duration::from_mins(10)
+    }
+
+    async fn get_status(&mut self) -> Result<(), MonitorError> {
+        match self.backup_db().await {
+            Ok(_) => Ok(()),
+            Err(err) => Err(MonitorError::Down(err)),
+        }
     }
 }

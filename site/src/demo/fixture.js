@@ -37,9 +37,9 @@ function at(now, daysAgo, hour, minute = 0) {
  * minute after the page loaded.
  */
 export const MONITORS = [
-  { monitor_id: "internet", up: false, next_update_in: 60 },
-  { monitor_id: "power", up: true, next_update_in: 60 },
-  { monitor_id: "backup", up: true, next_update_in: 3700 },
+  { monitor_id: "internet", next_update_in: 60 },
+  { monitor_id: "power", next_update_in: 60 },
+  { monitor_id: "backup", next_update_in: 3700 },
 ];
 
 /**

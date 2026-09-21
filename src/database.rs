@@ -21,7 +21,6 @@ pub(crate) struct OverallStatus {
 #[derive(Serialize)]
 pub(crate) struct MonitorRow {
     monitor_id: String,
-    up: bool,
     next_update_in: i64,
     last_update: i64,
 }
@@ -41,6 +40,28 @@ pub(crate) enum PatchOutcome {
     OutageNotFound,
 }
 
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(crate) enum MonitorStatus {
+    Up,
+    Down,
+    Unknown,
+}
+
+impl MonitorStatus {
+    fn from_outage(untracked: Option<bool>) -> Self {
+        match untracked {
+            None => MonitorStatus::Up,
+            Some(false) => MonitorStatus::Down,
+            Some(true) => MonitorStatus::Unknown,
+        }
+    }
+
+    fn is_untracked(self) -> bool {
+        assert!(self != MonitorStatus::Up);
+        self == MonitorStatus::Unknown
+    }
+}
+
 impl Database {
     fn new(db_path: impl AsRef<Path>) -> Result<Self> {
         let connection = Connection::open(db_path)?;
@@ -53,7 +74,6 @@ impl Database {
             "
             CREATE TABLE IF NOT EXISTS monitor (
                 id              TEXT    PRIMARY KEY,
-                up              INTEGER NOT NULL,
                 next_update_in  INTEGER NOT NULL,
                 last_update     INTEGER NOT NULL
             );
@@ -92,13 +112,14 @@ impl Database {
         Ok(database)
     }
 
-    fn end_ongoing_outage(tx: &Transaction, monitor_id: &str, end: i64) -> anyhow::Result<()> {
-        let outage_start = tx
-            .prepare_cached("SELECT start FROM outages WHERE monitor_id = ?1 AND end IS NULL")?
-            .query_one(&[monitor_id], |row| row.get::<_, i64>("start"))?;
-
+    fn end_ongoing_outage(
+        tx: &Transaction,
+        monitor_id: &str,
+        start: i64,
+        end: i64,
+    ) -> anyhow::Result<()> {
         // delete the ongoing outage if there is no recorded duration
-        if outage_start == end {
+        if start == end {
             tx.prepare_cached("DELETE FROM outages WHERE monitor_id = ?1 AND end IS NULL")?
                 .execute(&[monitor_id])?;
         } else {
@@ -113,13 +134,12 @@ impl Database {
             .connection
             .prepare_cached(
                 "
-                SELECT id, up, next_update_in, last_update
+                SELECT id, next_update_in, last_update
                 FROM monitor",
             )?
             .query_map([], |row| {
                 Ok(MonitorRow {
                     monitor_id: row.get("id")?,
-                    up: row.get("up")?,
                     next_update_in: row.get("next_update_in")?,
                     last_update: row.get("last_update")?,
                 })
@@ -200,23 +220,27 @@ impl Database {
     fn update_status(
         &mut self,
         monitor_id: &str,
-        up: bool,
+        status: MonitorStatus,
         next_update_in: i64,
         now: i64,
     ) -> anyhow::Result<()> {
         let tx = self.connection.transaction()?;
         {
             let mut stmt = tx.prepare_cached(
-                "SELECT up, next_update_in, last_update FROM monitor WHERE id = ?1",
+                "SELECT m.next_update_in, m.last_update, o.start, o.untracked
+                 FROM monitor m
+                 LEFT JOIN outages o ON o.monitor_id = m.id AND o.end IS NULL
+                 WHERE m.id = ?1",
             )?;
             match stmt.query_one([monitor_id], |row| {
                 Ok((
-                    row.get::<_, bool>("up")?,
                     row.get::<_, i64>("next_update_in")?,
                     row.get::<_, i64>("last_update")?,
+                    row.get::<_, Option<i64>>("start")?,
+                    MonitorStatus::from_outage(row.get::<_, Option<bool>>("untracked")?),
                 ))
             }) {
-                Ok((mut old_up, old_next_update_in, old_last_update)) => {
+                Ok((old_next_update_in, old_last_update, mut outage_start, mut saved_status)) => {
                     // Ensure update is actually newer compared to the previous database entry
                     if now <= old_last_update {
                         bail!(
@@ -227,50 +251,89 @@ impl Database {
 
                     // Update monitor status
                     tx.prepare_cached(
-                        "UPDATE monitor SET up = ?2, next_update_in = ?3, last_update = ?4 WHERE id = ?1",
+                        "UPDATE monitor SET next_update_in = ?2, last_update = ?3 WHERE id = ?1",
                     )?
-                    .execute(params![monitor_id, up, next_update_in, now])?;
+                    .execute(params![monitor_id, next_update_in, now])?;
 
                     // Detect if the monitor was down
                     if old_last_update + next_update_in.max(old_next_update_in) * 2 < now {
-                        // check if there was an ongoing outage
-                        if !old_up {
-                            Self::end_ongoing_outage(&tx, monitor_id, old_last_update)?;
-                            old_up = true;
-                        }
+                        // if there is an ongoing untracked outage, do nothing
+                        if saved_status != MonitorStatus::Unknown {
+                            // close ongoing tracked outage if there is one
+                            if let Some(start) = outage_start {
+                                Self::end_ongoing_outage(&tx, monitor_id, start, old_last_update)?;
+                                // outage_start = None;
+                                // saved_status = MonitorStatus::Up;
+                            }
 
-                        // add untracked outage
-                        tx.prepare_cached("INSERT INTO outages (monitor_id, start, end, untracked) VALUES (?, ?, ?, ?)")?
-                            .execute(params![monitor_id, old_last_update, now, 1])?;
+                            // add untracked outage
+
+                            // if the current status is Unknown (untracked outage), we'll leave it ongoing.
+                            if status == MonitorStatus::Unknown {
+                                tx.prepare_cached("INSERT INTO outages (monitor_id, start, end, untracked) VALUES (?, ?, ?, ?)")?
+                                    .execute(params![monitor_id, old_last_update, Null, 1])?;
+                                outage_start = Some(old_last_update);
+                                saved_status = MonitorStatus::Unknown;
+                            } else {
+                                tx.prepare_cached("INSERT INTO outages (monitor_id, start, end, untracked) VALUES (?, ?, ?, ?)")?
+                                    .execute(params![monitor_id, old_last_update, now, 1])?;
+                                outage_start = None;
+                                saved_status = MonitorStatus::Up;
+                            }
+                        }
                     }
 
-                    if up != old_up {
-                        match up {
-                            // outage just started
-                            false => {
-                                tx.prepare_cached("INSERT INTO outages (monitor_id, start, end, untracked) VALUES (?, ?, ?, ?)")?
-                                    .execute(params![monitor_id, now, Null, 0])?;
-                            }
-                            // outage just ended
-                            true => Self::end_ongoing_outage(&tx, monitor_id, old_last_update)?,
+                    // update db with the current status
+                    while status != saved_status {
+                        // close ongoing outage
+                        if let Some(start) = outage_start {
+                            let outage_end = match saved_status.is_untracked() {
+                                true => now,
+                                false => old_last_update,
+                            };
+                            Self::end_ongoing_outage(&tx, monitor_id, start, outage_end)?;
+                            outage_start = None;
+                            saved_status = MonitorStatus::Up;
+                            continue;
+                        }
+
+                        assert!(saved_status == MonitorStatus::Up);
+
+                        let start = match status.is_untracked() {
+                            true => old_last_update,
+                            false => now,
                         };
+                        tx.prepare_cached("INSERT INTO outages (monitor_id, start, end, untracked) VALUES (?, ?, ?, ?)")?
+                                .execute(params![
+                                    monitor_id,
+                                    start,
+                                    Null,
+                                    status.is_untracked()
+                                ])?;
+                        saved_status = status;
                     }
                 }
                 Err(rusqlite::Error::QueryReturnedNoRows) => {
                     // Add monitor
                     tx.prepare_cached(
-                        "INSERT INTO monitor (id, up, next_update_in, last_update) VALUES (?, ?, ?, ?)",
+                        "INSERT INTO monitor (id, next_update_in, last_update) VALUES (?, ?, ?)",
                     )?
-                    .execute(params![monitor_id, up, next_update_in, now])?;
+                    .execute(params![monitor_id, next_update_in, now])?;
 
-                    // Add untracked outage from the beginning of time
-                    tx.prepare_cached("INSERT INTO outages (monitor_id, start, end, untracked) VALUES (?, ?, ?, ?)")?
-                        .execute(params![monitor_id, 0, now, 1])?;
-
-                    // add an ongoing outage if down
-                    if !up {
+                    if status == MonitorStatus::Unknown {
+                        // add an ongoing untracked outage starting from the beginning of time
                         tx.prepare_cached("INSERT INTO outages (monitor_id, start, end, untracked) VALUES (?, ?, ?, ?)")?
-                            .execute(params![monitor_id, now, Null, 0])?;
+                                .execute(params![monitor_id, 0, Null, 1])?;
+                    } else {
+                        // and an untracked outage from the beginning of time
+                        tx.prepare_cached("INSERT INTO outages (monitor_id, start, end, untracked) VALUES (?, ?, ?, ?)")?
+                            .execute(params![monitor_id, 0, now, 1])?;
+
+                        // add an ongoing tracked outage if currently down
+                        if status == MonitorStatus::Down {
+                            tx.prepare_cached("INSERT INTO outages (monitor_id, start, end, untracked) VALUES (?, ?, ?, ?)")?
+                                .execute(params![monitor_id, now, Null, 0])?;
+                        }
                     }
                 }
                 Err(e) => bail!("sqlite error: {e}"),
@@ -287,7 +350,13 @@ impl Database {
 
 enum DatabaseMessage {
     GetOverallStatus(oneshot::Sender<anyhow::Result<OverallStatus>>),
-    UpdateStatus(oneshot::Sender<anyhow::Result<()>>, String, bool, i64, i64),
+    UpdateStatus(
+        oneshot::Sender<anyhow::Result<()>>,
+        String,
+        MonitorStatus,
+        i64,
+        i64,
+    ),
     PatchOutageInfo(
         oneshot::Sender<anyhow::Result<PatchOutcome>>,
         String,
@@ -317,13 +386,13 @@ impl DatabaseHandle {
                     DatabaseMessage::UpdateStatus(
                         tx,
                         monitor_id,
-                        up,
+                        status,
                         next_update_in,
                         last_update,
                     ) => {
                         let _ = tx.send(database.update_status(
                             &monitor_id,
-                            up,
+                            status,
                             next_update_in,
                             last_update,
                         ));
@@ -349,12 +418,13 @@ impl DatabaseHandle {
     pub async fn update_status(
         &self,
         monitor_id: impl Into<String>,
-        up: bool,
+        status: MonitorStatus,
         next_update_in: i64,
     ) -> anyhow::Result<()> {
         let now = SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs() as i64;
         let (tx, rx) = oneshot::channel();
-        let message = DatabaseMessage::UpdateStatus(tx, monitor_id.into(), up, next_update_in, now);
+        let message =
+            DatabaseMessage::UpdateStatus(tx, monitor_id.into(), status, next_update_in, now);
         self.sender.send(message)?;
         rx.await?
     }

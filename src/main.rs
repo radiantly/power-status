@@ -9,12 +9,12 @@ use tracing_subscriber::{EnvFilter, fmt, layer::SubscriberExt, util::SubscriberI
 
 use crate::{
     config::{
-        DB_BACKUP_PATH, DB_PATH, SFTP_ENABLE, SFTP_PRIVATE_KEY, SFTP_SERVER,
+        DB_BACKUP_PATH, DB_PATH, GATEWAY_IP, SFTP_ENABLE, SFTP_PRIVATE_KEY, SFTP_SERVER,
         SFTP_SERVER_FINGERPRINT, SFTP_SERVER_FINGERPRINT_ALGO, SFTP_USERNAME, TAPO_PASSWORD,
         TAPO_PLUG_IP, TAPO_USERNAME,
     },
-    database::DatabaseHandle,
-    monitor::{BackupMonitor, InternetMonitor, TapoPowerMonitor},
+    database::{DatabaseHandle, MonitorStatus},
+    monitor::{BackupMonitor, InternetMonitor, MonitorError, TapoPowerMonitor},
 };
 use tokio::time::{Instant, sleep};
 mod auth;
@@ -34,9 +34,10 @@ async fn main() -> anyhow::Result<()> {
     let database = DatabaseHandle::new(DB_PATH)?;
 
     let tapo_power = TapoPowerMonitor::new(
+        TAPO_PLUG_IP,
         TAPO_USERNAME,
         TAPO_PASSWORD,
-        TAPO_PLUG_IP,
+        GATEWAY_IP,
         Duration::from_secs(5),
     );
 
@@ -66,17 +67,28 @@ async fn main() -> anyhow::Result<()> {
             loop {
                 let start_time = Instant::now();
                 let timeout = monitor.timeout_interval();
-                let up = tokio::select! {
-                    result = monitor.get_status() => {
-                        result.map_err(|e| tracing::debug!("Monitor down: {e}")).is_ok()
+                let status = tokio::select! {
+                    result = monitor.get_status() => match result {
+                        Ok(()) => MonitorStatus::Up,
+                        Err(MonitorError::Down(e)) => {
+                            tracing::debug!("Monitor down: {e:#}");
+                            MonitorStatus::Down
+                        }
+                        Err(MonitorError::Indeterminate(e)) => {
+                            tracing::debug!("Monitor could not tell: {e:#}");
+                            MonitorStatus::Unknown
+                        }
                     },
-                    _ = sleep(timeout) => false
+                    _ = sleep(timeout) => {
+                        tracing::debug!("Monitor timed out after {timeout:?}");
+                        MonitorStatus::Down
+                    }
                 };
                 if let Err(e) = database
-                    .update_status(monitor_id, up, (timeout + interval).as_secs() as i64)
+                    .update_status(monitor_id, status, (timeout + interval).as_secs() as i64)
                     .await
                 {
-                    tracing::error!("Failed to update db with status: {e}")
+                    tracing::error!("Failed to update db with status: {e:#}")
                 }
                 let elapsed = start_time.elapsed();
                 if elapsed < interval {

@@ -32,10 +32,9 @@ systemctl restart caddy
 
 ### Architecture overview
 
-- `monitor` table: Contains four columns
+- `monitor` table: Contains three columns
   - `id` - string, primary key.
-  - `up` - integer 0 or 1, whether what is being monitored is up.
-  - `last_update` - integer timestamp, stores what time the `up` status was last updated.
+  - `last_update` - integer timestamp, stores what time the status was last updated.
   - `next_update_in` - integer seconds, the maximum time duration before the next update.
 - `outages` table: We only store aggregated outages. No individual pings. There are pros and cons, but I decided to go this route because less data, simpler to handle. But that also means we currently cannot store statistics like latency for internet or voltage reading for power.
   - `monitor_id` - string, foreign key.

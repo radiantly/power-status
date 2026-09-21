@@ -113,13 +113,15 @@ function buildDayCell(day, outages, now) {
   return { ...day, ...totals, segments, status: classifyDay(totals) };
 }
 
-function monitorState(monitor, now) {
+function monitorState(monitor, ongoing, now) {
   if (
     now - monitor.last_update >
     monitor.next_update_in * STALE_UPDATE_FACTOR + POLL_INTERVAL_MS / 1000
   )
     return MonitorState.Unknown;
-  return monitor.up ? MonitorState.Operational : MonitorState.Down;
+
+  if (!ongoing) return MonitorState.Operational;
+  return ongoing.untracked ? MonitorState.Unknown : MonitorState.Down;
 }
 
 function buildMonitor(monitor, outages, days, now) {
@@ -129,7 +131,7 @@ function buildMonitor(monitor, outages, days, now) {
     id: monitor.monitor_id,
     label: humanizeId(monitor.monitor_id),
     description: MONITORS[monitor.monitor_id]?.description ?? null,
-    state: monitorState(monitor, now),
+    state: monitorState(monitor, ongoing, now),
     lastUpdate: monitor.last_update,
     ongoingSince: ongoing?.start ?? null,
     days: days.map((day) => buildDayCell(day, outages, now)),

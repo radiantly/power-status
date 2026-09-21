@@ -2,6 +2,7 @@ import { UnauthorizedError, patchOutageInfo } from "../api/status.js";
 import { formatDuration, formatIso } from "../domain/format.js";
 import { buildView } from "../domain/status.js";
 import { useAdmin } from "../hooks/useAdmin.js";
+import { useFavicon } from "../hooks/useFavicon.js";
 import { useNow } from "../hooks/useNow.js";
 import { useStatus } from "../hooks/useStatus.js";
 import AdminLock from "./AdminLock.jsx";
@@ -55,6 +56,9 @@ export default function StatusPage() {
   const now = useNow();
   const admin = useAdmin();
 
+  const view = data ? buildView(data, now) : null;
+  useFavicon(view?.overall.state);
+
   const lock = <AdminLock unlocked={admin.unlocked} onUnlock={admin.unlock} onLock={admin.lock} />;
 
   if (phase === "loading") {
@@ -72,8 +76,6 @@ export default function StatusPage() {
       </Shell>
     );
   }
-
-  const view = buildView(data, now);
 
   // The refetch is what puts a saved note back on screen: the row re-renders
   // from the server's copy rather than from what was typed, so a write that did
