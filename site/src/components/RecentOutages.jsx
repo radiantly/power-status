@@ -23,15 +23,15 @@ const LABEL = {
 const TONE = {
   [OutageTone.Major]: {
     rule: "bg-major",
-    pill: "bg-major-soft text-ink",
+    pill: "bg-major-soft text-major",
   },
   [OutageTone.Minor]: {
     rule: "bg-minor",
-    pill: "bg-minor-soft text-ink",
+    pill: "bg-minor-soft text-minor",
   },
   [OutageTone.Untracked]: {
     rule: "bg-untracked",
-    pill: "bg-untracked-soft text-ink",
+    pill: "bg-untracked-soft text-muted",
   },
 };
 
