@@ -9,9 +9,9 @@ import Pill from "./Pill.jsx";
 /**
  * What a row is called, and how it is painted -- two questions of different
  * shapes, so two tables rather than one repeating itself. Four kinds share
- * three tones, and which kinds share one is OutageTone's to say: merging rows
- * turns on the same fact, and a palette that restated it could drift from the
- * rule without anything noticing.
+ * three tones, and which kinds share one is OutageTone's to say rather than
+ * this palette's: it follows from what the kinds mean, not from how a row
+ * happens to be drawn.
  */
 const LABEL = {
   [OutageKind.Major]: "Major",
@@ -24,17 +24,14 @@ const TONE = {
   [OutageTone.Major]: {
     rule: "bg-major",
     pill: "bg-major-soft text-ink",
-    dot: "bg-major",
   },
   [OutageTone.Minor]: {
     rule: "bg-minor",
     pill: "bg-minor-soft text-ink",
-    dot: "bg-minor",
   },
   [OutageTone.Untracked]: {
     rule: "bg-untracked",
     pill: "bg-untracked-soft text-ink",
-    dot: "bg-untracked",
   },
 };
 
@@ -212,13 +209,17 @@ export default function RecentOutages({ outages, onSave }) {
 
                     {/*
                       A clipped span is a floor, not a measurement, so it is
-                      marked. The separator only exists where the timestamp and
-                      the duration sit on one line.
+                      marked. An open one is a floor as well, but it is left
+                      unmarked: it is the only duration on the page that climbs
+                      while the page sits there, and the card above already
+                      names the outage that is still running.
+
+                      The separator only exists where the timestamp and the
+                      duration sit on one line.
                     */}
                     <span className="font-mono text-xs text-muted before:mr-1.5 before:content-['·'] sm:col-[5] sm:row-[1] sm:text-right sm:before:content-none">
                       {row.clipped && "≥"}
                       {formatDuration(row.seconds)}
-                      {row.ongoing && " · ongoing"}
                     </span>
 
                     {/*
@@ -251,9 +252,7 @@ export default function RecentOutages({ outages, onSave }) {
                         </button>
                       )}
 
-                      <Pill className={tone.pill} dotClassName={tone.dot}>
-                        {LABEL[row.kind]}
-                      </Pill>
+                      <Pill className={tone.pill}>{LABEL[row.kind]}</Pill>
                     </div>
 
                     <div className="col-span-3 min-w-0 sm:col-[3] sm:row-[1]">

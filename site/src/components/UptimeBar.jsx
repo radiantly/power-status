@@ -79,7 +79,7 @@ export default function UptimeBar({ cells }) {
   return (
     <div className="relative">
       <div
-        className="flex touch-pan-y items-stretch gap-[var(--bar-gap)]"
+        className="flex touch-pan-y items-stretch select-none gap-[var(--bar-gap)]"
         onPointerDown={(event) => {
           // Read the press before claiming the gesture: a tap that never moves
           // has only this to light a bar with, and it should not depend on

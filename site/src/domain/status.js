@@ -67,8 +67,8 @@ export const OutageKind = {
  * less Operational, which no logged interval can be.
  *
  * Stated here rather than left implicit in whichever palette happens to draw a
- * row, because two things now depend on knowing it and they must not drift: the
- * palette, and the rule deciding which neighbouring rows may be told as one.
+ * row, because which kinds share a colour follows from what the kinds mean and
+ * not from anything the drawing of a row knows.
  */
 export const OutageTone = {
   Major: "major",
@@ -84,6 +84,17 @@ const TONE = {
 };
 
 export const outageTone = (kind) => TONE[kind];
+
+/**
+ * The kinds, worst first.
+ *
+ * A merged row is called after the worst thing in it, which needs an order over
+ * all four kinds rather than the partial one the tones imply. Excluded outranks
+ * NoData on the same reading that words a grey row: a run containing a
+ * judgement somebody made by hand should not read as a stretch nobody looked
+ * at.
+ */
+const SEVERITY = [OutageKind.Major, OutageKind.Minor, OutageKind.Excluded, OutageKind.NoData];
 
 /**
  * Whether an outage counts against uptime.
@@ -324,33 +335,26 @@ export function buildView(payload, now, visible = SHOWN_MONITORS) {
  * and the internet together, logged once per monitor. An absent note says
  * nothing at all and so can never be that evidence.
  *
- * Tone rather than kind, because a merged row shows one pill and the pill is
- * what the reader believes: folding a major outage into a minor one would
- * misstate whichever lost. Two kinds share the untracked tone, so a no-data
- * stretch and an excluded one do merge -- see OutageTone.
+ * The note decides it alone. How severe each half turned out is a fact about
+ * the monitors rather than about whether one thing caused both -- the same cut
+ * can cost an hour of power and two minutes of internet -- so severity is left
+ * to the merged row to report rather than made a condition of merging at all.
+ * See rowKind.
  *
  * Neighbouring in the list, not merely somewhere in it: anything that happened
  * between the two is a reason to doubt they were the same event, and the list
  * is ordered so that "between" is simply the row in between.
  */
-const sameEvent = (a, b) =>
-  Boolean(a.notes) && a.notes === b.notes && outageTone(a.kind) === outageTone(b.kind);
+const sameEvent = (a, b) => Boolean(a.notes) && a.notes === b.notes;
 
 /**
- * What a merged row is called, where its members may disagree.
+ * What a merged row is called, where its members disagree.
  *
- * Only the untracked tone can disagree at all, since the other two are single
- * kinds. There, excluded wins: the run contains a judgement somebody made by
- * hand, and a row that said "no data" would bury it. The weaker word is kept
- * only for a run where nothing was ever judged.
+ * The worst kind in the run, because one pill stands for the lot and the pill
+ * is what the reader takes away: a major outage folded into a row that said
+ * "minor" -- or "no data" -- would understate what happened. See SEVERITY.
  */
-function rowKind(items) {
-  const kind = items[0].kind;
-  if (kind !== OutageKind.NoData && kind !== OutageKind.Excluded) return kind;
-  return items.every((item) => item.kind === OutageKind.NoData)
-    ? OutageKind.NoData
-    : OutageKind.Excluded;
-}
+const rowKind = (items) => SEVERITY.find((kind) => items.some((item) => item.kind === kind));
 
 /** The monitors a row speaks for, in the list's own tiebreak order. */
 const rowLabel = (items) =>
@@ -403,8 +407,8 @@ export function toRows(entries, { collapse = true } = {}) {
 
   for (const entry of entries) {
     const run = runs.at(-1);
-    // Both halves of sameEvent are equalities, so a run is homogeneous and its
-    // last member can speak for the whole of it.
+    // sameEvent is an equality on the note, so it is transitive: testing the
+    // entry against the run's last member tests it against the whole run.
     if (collapse && run && sameEvent(run.at(-1), entry)) run.push(entry);
     else runs.push([entry]);
   }

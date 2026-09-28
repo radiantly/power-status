@@ -15,10 +15,10 @@ import { MonitorState } from "./status.js";
  * whatever `index.css` currently means by "up" -- the dark scheme's value
  * included, which the static favicon used to carry its own silent copy of.
  *
- * The twin of `PILL` in `components/StatePill.jsx`: the circle below is that
- * component's dot at 32px and the two are meant to agree, so they are keyed
- * alike. One map cannot serve both, because Tailwind needs its class names
- * written out literally and this needs the custom properties behind them.
+ * The twin of `PILL` in `components/StatePill.jsx`: a state is the same colour
+ * wherever it is shown, the tab included, so the two maps are keyed alike and
+ * are meant to agree. One cannot serve both, because Tailwind needs its class
+ * names written out literally and this needs the custom properties behind them.
  */
 export const FAVICON_TOKEN = {
   [MonitorState.Operational]: "--color-up",
